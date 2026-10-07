@@ -1,0 +1,64 @@
+# Apenas desenvolvimento/interno. Segredos abaixo são valores de dev, nunca usar em produção.
+name: agent-qa
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: qa
+      POSTGRES_PASSWORD: qa
+      POSTGRES_DB: qa
+    volumes: ["pgdata:/var/lib/postgresql"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U qa"]
+      interval: 3s
+      retries: 20
+
+  minio:
+    image: quay.io/minio/minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minio
+      MINIO_ROOT_PASSWORD: minio-dev-secret
+    ports: ["9090:9001"]  # console do MinIO; a API (9000) só vale dentro da rede do compose
+    volumes: ["miniodata:/data"]
+
+  control-plane:
+    build: ../../control-plane
+    environment:
+      DATABASE_URL: postgres://qa:qa@postgres:5432/qa?sslmode=disable
+      AUTH_MODE: dev
+      RUNNER_BOOTSTRAP_TOKEN: dev-bootstrap-token  # só dev
+      ENCRYPTION_KEY: ZGV2LW9ubHkta2V5LWRldi1vbmx5LWtleS0xMjM0NSE=  # só dev
+      LLM_PROVIDER: ${LLM_PROVIDER:-}
+      LLM_ENDPOINT: ${LLM_ENDPOINT:-}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-}
+      LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-}
+      STORAGE_DRIVER: s3
+      STORAGE_ENDPOINT: minio:9000
+      STORAGE_ACCESS_KEY: minio
+      STORAGE_SECRET_KEY: minio-dev-secret  # só dev
+      STORAGE_BUCKET: evidence
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    ports: ["8083:8080"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      minio: { condition: service_started }
+
+  runner:
+    build: ../../runner
+    environment:
+      CONTROL_PLANE_URL: http://control-plane:8080
+      RUNNER_BOOTSTRAP_TOKEN: dev-bootstrap-token  # só dev
+      RUNNER_NAME: compose-runner
+      RUNNER_LABELS: browser
+    depends_on: [control-plane]
+
+  web:
+    build: ../../web
+    ports: ["3010:8080"]
+    depends_on: [control-plane]
+
+volumes:
+  pgdata:
+  miniodata:

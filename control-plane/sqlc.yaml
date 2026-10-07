@@ -1,0 +1,356 @@
+version: "2"
+sql:
+  - &base
+    engine: postgresql
+    schema: db/migrations
+    queries: db/queries/org.sql
+    gen:
+      go:
+        package: org
+        out: internal/org
+        sql_package: pgx/v5
+        overrides:
+          - db_type: uuid
+            go_type: github.com/google/uuid.UUID
+          - db_type: uuid
+            nullable: true
+            go_type: github.com/google/uuid.NullUUID
+          - db_type: pg_catalog.numeric
+            go_type: float64
+          - db_type: text
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+  - <<: *base
+    queries: db/queries/auth.sql
+    gen:
+      go:
+        package: auth
+        out: internal/auth
+        sql_package: pgx/v5
+        overrides:
+          - db_type: uuid
+            go_type: github.com/google/uuid.UUID
+          - db_type: uuid
+            nullable: true
+            go_type: github.com/google/uuid.NullUUID
+          - db_type: pg_catalog.numeric
+            go_type: float64
+          - db_type: text
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+        output_db_file_name: db_gen.go
+        output_models_file_name: models_gen.go
+  - <<: *base
+    queries: db/queries/audit.sql
+    gen:
+      go:
+        package: audit
+        out: internal/audit
+        sql_package: pgx/v5
+        overrides:
+          - db_type: uuid
+            go_type: github.com/google/uuid.UUID
+          - db_type: uuid
+            nullable: true
+            go_type: github.com/google/uuid.NullUUID
+          - db_type: pg_catalog.numeric
+            go_type: float64
+          - db_type: text
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+  - <<: *base
+    queries: db/queries/project.sql
+    gen:
+      go:
+        package: project
+        out: internal/project
+        sql_package: pgx/v5
+        overrides:
+          - db_type: uuid
+            go_type: github.com/google/uuid.UUID
+          - db_type: uuid
+            nullable: true
+            go_type: github.com/google/uuid.NullUUID
+          - db_type: pg_catalog.numeric
+            go_type: float64
+          - db_type: text
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+  - <<: *base
+    queries: db/queries/environment.sql
+    gen:
+      go:
+        package: environment
+        out: internal/environment
+        sql_package: pgx/v5
+        overrides:
+          - db_type: uuid
+            go_type: github.com/google/uuid.UUID
+          - db_type: uuid
+            nullable: true
+            go_type: github.com/google/uuid.NullUUID
+          - db_type: pg_catalog.numeric
+            go_type: float64
+          - db_type: text
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+  - <<: *base
+    queries: db/queries/spec.sql
+    gen:
+      go:
+        package: spec
+        out: internal/spec
+        sql_package: pgx/v5
+        overrides:
+          - db_type: uuid
+            go_type: github.com/google/uuid.UUID
+          - db_type: uuid
+            nullable: true
+            go_type: github.com/google/uuid.NullUUID
+          - db_type: pg_catalog.numeric
+            go_type: float64
+          - db_type: text
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+  - <<: *base
+    queries: db/queries/llm.sql
+    gen:
+      go:
+        package: llm
+        out: internal/llm
+        sql_package: pgx/v5
+        overrides:
+          - db_type: uuid
+            go_type: github.com/google/uuid.UUID
+          - db_type: uuid
+            nullable: true
+            go_type: github.com/google/uuid.NullUUID
+          - db_type: pg_catalog.numeric
+            go_type: float64
+          - db_type: text
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+  - <<: *base
+    queries: db/queries/graph.sql
+    gen:
+      go:
+        package: graph
+        out: internal/graph
+        sql_package: pgx/v5
+        overrides:
+          - db_type: uuid
+            go_type: github.com/google/uuid.UUID
+          - db_type: uuid
+            nullable: true
+            go_type: github.com/google/uuid.NullUUID
+          - db_type: pg_catalog.numeric
+            go_type: float64
+          - db_type: text
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+  - <<: *base
+    queries: db/queries/brief.sql
+    gen:
+      go:
+        package: brief
+        out: internal/brief
+        sql_package: pgx/v5
+        overrides:
+          - db_type: uuid
+            go_type: github.com/google/uuid.UUID
+          - db_type: uuid
+            nullable: true
+            go_type: github.com/google/uuid.NullUUID
+          - db_type: pg_catalog.numeric
+            go_type: float64
+          - db_type: text
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+  - <<: *base
+    queries: db/queries/run.sql
+    gen:
+      go:
+        package: run
+        out: internal/run
+        sql_package: pgx/v5
+        overrides:
+          - db_type: uuid
+            go_type: github.com/google/uuid.UUID
+          - db_type: uuid
+            nullable: true
+            go_type: github.com/google/uuid.NullUUID
+          - db_type: pg_catalog.numeric
+            go_type: float64
+          - db_type: text
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+  - <<: *base
+    queries: db/queries/runner.sql
+    gen:
+      go:
+        package: runnerapi
+        out: internal/runnerapi
+        sql_package: pgx/v5
+        overrides:
+          - db_type: uuid
+            go_type: github.com/google/uuid.UUID
+          - db_type: uuid
+            nullable: true
+            go_type: github.com/google/uuid.NullUUID
+          - db_type: pg_catalog.numeric
+            go_type: float64
+          - db_type: text
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+  - <<: *base
+    queries: db/queries/pendency.sql
+    gen:
+      go:
+        package: pendency
+        out: internal/pendency
+        sql_package: pgx/v5
+        overrides:
+          - db_type: uuid
+            go_type: github.com/google/uuid.UUID
+          - db_type: uuid
+            nullable: true
+            go_type: github.com/google/uuid.NullUUID
+          - db_type: pg_catalog.numeric
+            go_type: float64
+          - db_type: text
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+  - <<: *base
+    queries: db/queries/knowledge.sql
+    gen:
+      go:
+        package: knowledge
+        out: internal/knowledge
+        sql_package: pgx/v5
+        overrides:
+          - db_type: uuid
+            go_type: github.com/google/uuid.UUID
+          - db_type: uuid
+            nullable: true
+            go_type: github.com/google/uuid.NullUUID
+          - db_type: pg_catalog.numeric
+            go_type: float64
+          - db_type: text
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+  - <<: *base
+    queries: db/queries/step.sql
+    gen:
+      go:
+        package: step
+        out: internal/step
+        sql_package: pgx/v5
+        overrides:
+          - db_type: uuid
+            go_type: github.com/google/uuid.UUID
+          - db_type: uuid
+            nullable: true
+            go_type: github.com/google/uuid.NullUUID
+          - db_type: text
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+  - <<: *base
+    queries: db/queries/bug.sql
+    gen:
+      go:
+        package: bug
+        out: internal/bug
+        sql_package: pgx/v5
+        overrides:
+          - db_type: uuid
+            go_type: github.com/google/uuid.UUID
+          - db_type: uuid
+            nullable: true
+            go_type: github.com/google/uuid.NullUUID
+          - db_type: text
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+  - <<: *base
+    queries: db/queries/report.sql
+    gen:
+      go:
+        package: report
+        out: internal/report
+        sql_package: pgx/v5
+        overrides:
+          - db_type: uuid
+            go_type: github.com/google/uuid.UUID
+          - db_type: uuid
+            nullable: true
+            go_type: github.com/google/uuid.NullUUID
+          - db_type: text
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+  - <<: *base
+    queries: db/queries/apitoken.sql
+    gen:
+      go:
+        package: apitoken
+        out: internal/apitoken
+        sql_package: pgx/v5
+        overrides:
+          - db_type: uuid
+            go_type: github.com/google/uuid.UUID
+          - db_type: uuid
+            nullable: true
+            go_type: github.com/google/uuid.NullUUID
+          - db_type: text
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+  - <<: *base
+    queries: db/queries/schedule.sql
+    gen:
+      go:
+        package: schedule
+        out: internal/schedule
+        sql_package: pgx/v5
+        overrides:
+          - db_type: uuid
+            go_type: github.com/google/uuid.UUID
+          - db_type: uuid
+            nullable: true
+            go_type: github.com/google/uuid.NullUUID
+          - db_type: text
+            nullable: true
+            go_type:
+              type: string
+              pointer: true

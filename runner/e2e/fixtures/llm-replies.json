@@ -1,0 +1,5 @@
+{
+  "_comment": "Respostas de LLM gravadas (escritas à mão) por rota da página atual, para o E2E determinístico. Os índices referem-se à lista de candidatos oferecida ao modelo.",
+  "/": { "order": [1, 2, 3, 4] },
+  "/orders": { "order": [99, 1, 2, 1, -1, 0] }
+}

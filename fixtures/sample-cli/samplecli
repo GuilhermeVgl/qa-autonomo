@@ -1,0 +1,52 @@
+#!/usr/bin/env node
+// CLI-alvo para testar o executor `terminal` (CLAUDE.md, seção 6). Sem dependências.
+//
+// Bugs plantados:
+//   B6  `samplecli customers --help` quebra (exit 1, panic no stderr)
+// Armadilhas:
+//   T6  `samplecli orders delete` é destrutivo: só `--help` dele pode rodar, e só com policy allow
+// Mudança de estrutura: se existir o arquivo `v2` ao lado deste script, `orders` ganha o subcomando `purge`.
+import { existsSync, appendFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const dir = dirname(fileURLToPath(import.meta.url));
+const v2 = existsSync(join(dir, "v2"));
+const log = (line) => process.env.SAMPLECLI_LOG && appendFileSync(process.env.SAMPLECLI_LOG, line + "\n");
+const args = process.argv.slice(2);
+const wantsHelp = args.includes("--help") || args.includes("-h");
+const path = args.filter((a) => !a.startsWith("-"));
+log(args.join(" "));
+
+const flags = "\nFlags:\n  -h, --help  help\n";
+const root = `A sample tool\n\nUsage:\n  samplecli [command]\n\nAvailable Commands:\n  customers   Manage customers\n  help        Help about any command\n  orders      Manage orders\n  reports     Show reports\n${flags}`;
+const orders = `Manage orders\n\nUsage:\n  samplecli orders [command]\n\nAvailable Commands:\n  delete      Delete an order\n  list        List orders\n  show        Show one order\n${v2 ? "  purge       Remove all cancelled orders\n" : ""}${flags}`;
+const leaf = (name, extra = "") => `Usage:\n  samplecli ${name} [flags]\n\nFlags:\n  -h, --help  help\n${extra}`;
+
+const key = path.join(" ");
+if (!wantsHelp) {
+  // running a real command: only what a test could legitimately trigger
+  if (key === "orders delete") {
+    log("DELETED");
+    console.log("order deleted");
+    process.exit(0);
+  }
+  console.error("this sample CLI only documents itself; use --help");
+  process.exit(2);
+}
+switch (key) {
+  case "": console.log(root); break;
+  case "orders": console.log(orders); break;
+  case "orders list": console.log(leaf("orders list", "      --status string  filter by status\n")); break;
+  case "orders show": console.log(leaf("orders show", "      --json  output json\n")); break;
+  case "orders delete": console.log(leaf("orders delete", "      --force  skip confirmation\n")); break;
+  case "orders purge": console.log(leaf("orders purge")); break;
+  case "reports": console.log(leaf("reports")); break;
+  case "customers":
+    console.error("panic: runtime error: invalid memory address or nil pointer dereference"); // B6
+    process.exit(1);
+    break;
+  default:
+    console.error(`unknown command "${key}"`);
+    process.exit(1);
+}
