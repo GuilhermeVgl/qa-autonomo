@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifyIntent, effectiveMethod, endpointPath, fakeValue, formEncodedFields, needsAllow } from "./controls.js";
+import { classifyIntent, effectiveMethod, endpointPath, fakeValue, formEncodedFields, isOwnAccountForm, needsAllow } from "./controls.js";
 import type { FieldInfo } from "./interaction.js";
 
 const field = (over: Partial<FieldInfo>): FieldInfo => ({ ref: "x", name: "", type: "text", label: "", required: false, placeholder: "", options: [], ...over });
@@ -46,6 +46,28 @@ describe("needsAllow", () => {
     expect(needsAllow("create")).toBe(false);
     expect(needsAllow("save")).toBe(false);
     expect(needsAllow("open")).toBe(false);
+  });
+});
+
+describe("isOwnAccountForm", () => {
+  const own = (over: Partial<Parameters<typeof isOwnAccountForm>[0]> = {}) =>
+    isOwnAccountForm({ action: "/profile", label: "Meu perfil", submitLabel: "Salvar", fields: [], ...over });
+
+  it("flags forms that look like profile/account updates of the logged-in user", () => {
+    expect(own()).toBe(true);
+    expect(own({ action: "/settings/account", label: "Configurações", submitLabel: "Atualizar", fields: [{ ...field({ name: "email", label: "E-mail" }), type: "email" }] })).toBe(true);
+    expect(own({ action: "/users/edit", fields: [{ ...field({ name: "current_password", label: "Senha atual", type: "password" }) }] })).toBe(true);
+  });
+
+  it("keeps regular business forms testable", () => {
+    expect(
+      own({
+        action: "/clients",
+        label: "Novo cliente",
+        submitLabel: "Salvar",
+        fields: [{ ...field({ name: "client[email]", label: "E-mail do cliente", type: "email" }) }],
+      }),
+    ).toBe(false);
   });
 });
 

@@ -9,6 +9,7 @@
     "lint": "eslint .",
     "test": "vitest run",
     "start": "node dist/main.js",
+    "capture": "node dist/capture.js",
     "test:e2e": "vitest run --config vitest.e2e.config.ts"
   },
   "engines": {

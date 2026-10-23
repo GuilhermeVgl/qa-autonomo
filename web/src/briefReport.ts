@@ -30,6 +30,13 @@ export interface BriefFacts {
     screens_without_requirement: string[];
     screens_without_requirement_total?: number;
   };
+  capabilities?: {
+    total: number;
+    covered: number;
+    tested: number;
+    failing: number;
+    list: { key: string; name: string; screens: number; screens_covered: number; screens_tested: number; status: "pass" | "fail" | "error" | "skipped" | "untested" }[];
+  };
   regression: {
     finished_at: string;
     passed: number;
@@ -70,6 +77,7 @@ const more = (shown: number, total: number | undefined): string => (total !== un
 
 const SEVERITY_LABEL: Record<string, string> = { critical: "crítico", high: "alto", normal: "normal" };
 const SOURCE_LABEL: Record<string, string> = { text: "texto", auto: "gerada do mapa", openapi: "OpenAPI", document: "documento" };
+const STATUS_LABEL: Record<string, string> = { pass: "passou", fail: "falhou", error: "erro", skipped: "pulada", untested: "não testada" };
 
 const esc = (s: string): string => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 const date = (iso: string | undefined): string => (iso ? new Date(iso).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" }) : "—");
@@ -110,6 +118,11 @@ export function renderMarkdown({ facts: f, narrative: n }: BriefResponse): strin
   if (f.coverage.unlinked.length > 0) out.push("### Requisitos sem tela", [...f.coverage.unlinked.map((r) => `- ${r.key}: ${r.text} (${SEVERITY_LABEL[r.criticality] ?? r.criticality})`), more(f.coverage.unlinked.length, f.coverage.unlinked_total)].filter(Boolean).join("\n"));
   if (f.coverage.screens_without_requirement.length > 0) out.push("### Telas sem requisito", [...f.coverage.screens_without_requirement.map((r) => `- ${r}`), more(f.coverage.screens_without_requirement.length, f.coverage.screens_without_requirement_total)].filter(Boolean).join("\n"));
   out.push("### Usuários e telas alcançadas", table(["Usuário", "Telas"], f.users.map((u) => [u, f.map.screens_by_user[u] ?? 0])) || "Nenhum usuário.");
+  if (f.capabilities && f.capabilities.total > 0) {
+    out.push("### Capacidades de produto");
+    out.push(`Total: **${f.capabilities.total}** · cobertas: **${f.capabilities.covered}** · testadas: **${f.capabilities.tested}** · com falha: **${f.capabilities.failing}**`);
+    out.push(table(["Capacidade", "Telas", "Cobertas", "Testadas", "Status"], f.capabilities.list.map((c) => [c.name, c.screens, c.screens_covered, c.screens_tested, STATUS_LABEL[c.status] ?? c.status])) || "");
+  }
   if (f.access.length > 0) out.push("### Fluxos alternativos", table(["Tela", "Alcançada por", "Não alcançada por"], f.access.map((a) => [a.route, who(a.users), who(a.missing_for)])));
   out.push("### Última regressão");
   if (!f.regression) out.push("Nenhuma regressão executada.");
@@ -199,6 +212,7 @@ export function renderHtml({ facts: f, narrative: n }: BriefResponse): string {
       kpi(f.users.length, "usuários explorados"),
       kpi(`${f.coverage.percent_requirements}%`, "requisitos ligados a telas"),
       kpi(`${f.coverage.percent_screens}%`, "telas com requisito"),
+      ...(f.capabilities ? [kpi(`${f.capabilities.tested}/${f.capabilities.total}`, "capacidades testadas"), kpi(f.capabilities.failing, "capacidades com falha")] : []),
       kpi(r ? `${r.passed} / ${r.failed + r.errored}` : "—", "aprovadas / reprovadas"),
       kpi(f.bugs.open, "bugs abertos"),
       ...(f.security && (f.security.checked || f.security.open > 0) ? [kpi(f.security.open, "falhas de segurança abertas")] : []),
@@ -221,6 +235,11 @@ export function renderHtml({ facts: f, narrative: n }: BriefResponse): string {
   if (f.coverage.unlinked.length > 0) parts.push("<h3>Requisitos sem tela</h3>", htmlTable(["Requisito", "Criticidade", "Texto"], f.coverage.unlinked.map((x) => [x.key, SEVERITY_LABEL[x.criticality] ?? x.criticality, x.text])), `<p class="meta">${esc(more(f.coverage.unlinked.length, f.coverage.unlinked_total))}</p>`);
   if (f.coverage.screens_without_requirement.length > 0) parts.push("<h3>Telas sem requisito</h3>", `<p>${f.coverage.screens_without_requirement.map(esc).join(", ")} ${esc(more(f.coverage.screens_without_requirement.length, f.coverage.screens_without_requirement_total))}</p>`);
   parts.push("<h3>Usuários e telas alcançadas</h3>", htmlTable(["Usuário", "Telas"], f.users.map((u) => [u, f.map.screens_by_user[u] ?? 0])) || "<p>Nenhum usuário.</p>");
+  if (f.capabilities && f.capabilities.total > 0) {
+    parts.push("<h3>Capacidades de produto</h3>");
+    parts.push(`<p>Total: <b>${f.capabilities.total}</b> · cobertas: <b>${f.capabilities.covered}</b> · testadas: <b>${f.capabilities.tested}</b> · com falha: <b>${f.capabilities.failing}</b>.</p>`);
+    parts.push(htmlTable(["Capacidade", "Telas", "Cobertas", "Testadas", "Status"], f.capabilities.list.map((c) => [c.name, c.screens, c.screens_covered, c.screens_tested, STATUS_LABEL[c.status] ?? c.status])));
+  }
   if (f.access.length > 0) parts.push("<h3>Fluxos alternativos</h3>", htmlTable(["Tela", "Alcançada por", "Não alcançada por"], f.access.map((a) => [a.route, who(a.users), who(a.missing_for)])));
   parts.push("<h3>Última regressão</h3>");
   if (!r) parts.push("<p>Nenhuma regressão executada.</p>");

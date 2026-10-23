@@ -1,7 +1,9 @@
 package ci_test
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"net/http"
 	"strings"
 	"testing"
@@ -14,6 +16,7 @@ import (
 	"github.com/kpmg/agent-qa/control-plane/internal/audit"
 	"github.com/kpmg/agent-qa/control-plane/internal/ci"
 	"github.com/kpmg/agent-qa/control-plane/internal/environment"
+	"github.com/kpmg/agent-qa/control-plane/internal/secret"
 	"github.com/kpmg/agent-qa/control-plane/internal/testutil"
 )
 
@@ -25,10 +28,14 @@ type fx struct {
 
 func setup(t *testing.T) *fx {
 	t.Helper()
+	box, err := secret.New(base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{1}, 32)))
+	if err != nil {
+		t.Fatal(err)
+	}
 	f := &fx{}
 	f.h = testutil.NewHarness(t, func(mux *http.ServeMux, mw func(http.Handler) http.Handler, pool *pgxpool.Pool) {
 		apitoken.Register(mux, mw, pool)
-		ci.Register(mux, pool, "https://qa.example")
+		ci.Register(mux, pool, box, "https://qa.example")
 	})
 	f.owner = f.h.Login("o@x.com", "owner")
 	f.w = f.h.SeedWorld()
@@ -246,5 +253,36 @@ func TestCI_ReportOfAFinishedRun(t *testing.T) {
 	f.h.JSON(rec, &rep)
 	if rep.Steps["fail"] != 1 || rep.Steps["pass"] != 1 || len(rep.Reqs) != 2 {
 		t.Errorf("report = %+v", rep)
+	}
+}
+
+func TestCI_SessionCredentialUpsert(t *testing.T) {
+	f := setup(t)
+	tok := f.newToken(apitoken.ScopeCredentialWrite)
+	body := map[string]any{"environment": "hml", "app_role": "admin", "state": `{"cookies":[{"name":"sid","value":"s3cr3t"}],"origins":[]}`}
+	if c := f.h.Do("PUT", "/ci/v1/credentials/session", tok.Token, body).Code; c != http.StatusNoContent {
+		t.Fatalf("put = %d", c)
+	}
+	// stored encrypted, never in plaintext, with kind=session
+	var raw []byte
+	var kind string
+	if err := f.h.Pool.QueryRow(context.Background(), `SELECT kind, payload_encrypted FROM credentials WHERE environment_id=$1 AND app_role='admin'`, f.w.EnvID).Scan(&kind, &raw); err != nil {
+		t.Fatal(err)
+	}
+	if kind != "session" || bytes.Contains(raw, []byte("s3cr3t")) {
+		t.Errorf("kind=%q, stored plaintext=%v", kind, bytes.Contains(raw, []byte("s3cr3t")))
+	}
+	// an unknown environment is 404
+	if c := f.h.Do("PUT", "/ci/v1/credentials/session", tok.Token, map[string]any{"environment": "nope", "app_role": "a", "state": "{}"}).Code; c != http.StatusNotFound {
+		t.Errorf("unknown env = %d, want 404", c)
+	}
+	// missing fields are rejected
+	if c := f.h.Do("PUT", "/ci/v1/credentials/session", tok.Token, map[string]any{"environment": "hml", "app_role": "a"}).Code; c != http.StatusBadRequest {
+		t.Errorf("missing state = %d, want 400", c)
+	}
+	// a token without the scope cannot write credentials
+	plain := f.newToken()
+	if c := f.h.Do("PUT", "/ci/v1/credentials/session", plain.Token, body).Code; c != http.StatusForbidden {
+		t.Errorf("no scope = %d, want 403", c)
 	}
 }

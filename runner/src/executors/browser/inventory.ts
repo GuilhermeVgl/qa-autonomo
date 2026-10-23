@@ -16,6 +16,18 @@ export function collectInventory(root: Document | Element, assumeVisible: boolea
     const style = doc.defaultView?.getComputedStyle(el);
     return el.getClientRects().length > 0 && style?.visibility !== "hidden";
   };
+  // The reusable chrome of an app (header, sidebar, fixed bars) repeats on every page: its controls are acted on once, not per page.
+  const CHROME_LANDMARKS = "header, nav, aside, [role=banner], [role=navigation], [role=complementary], [role=menubar]";
+  const isChrome = (el: Element): boolean => {
+    if (el.closest(CHROME_LANDMARKS)) return true;
+    if (assumeVisible) return false; // jsdom has no layout: landmarks only
+    let p: Element | null = el;
+    for (let i = 0; p && i < 10; i++, p = p.parentElement) {
+      const pos = doc.defaultView?.getComputedStyle(p).position;
+      if (pos === "fixed" || pos === "sticky") return true;
+    }
+    return false;
+  };
   const labelOf = (el: Element): string => {
     const input = el as HTMLInputElement;
     const fromLabel = input.labels && input.labels.length > 0 ? clean(input.labels[0]?.textContent, 80) : "";
@@ -99,6 +111,7 @@ export function collectInventory(root: Document | Element, assumeVisible: boolea
       submitLabel: submit ? textOf(submit) : "",
       hasFile: fields.some((f) => f.type === "file"),
       hasPassword: fields.some((f) => f.type === "password"),
+      ...(isChrome(form) ? { chrome: true } : {}),
     });
   }
 
@@ -114,6 +127,7 @@ export function collectInventory(root: Document | Element, assumeVisible: boolea
       label,
       kind: el.tagName === "SUMMARY" ? "summary" : role === "tab" ? "tab" : el.hasAttribute("aria-expanded") ? "toggle" : "button",
       disabled: (el as HTMLButtonElement).disabled === true || el.getAttribute("aria-disabled") === "true",
+      ...(isChrome(el) ? { chrome: true } : {}),
     });
   }
 

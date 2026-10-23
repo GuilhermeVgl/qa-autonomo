@@ -171,6 +171,31 @@ describe("Settings", () => {
     expect(screen.queryByDisplayValue("S3cret!")).not.toBeInTheDocument();
   });
 
+  it("salva um login só com usuário (sem senha), para SSO", async () => {
+    const calls = stub({
+      "GET /api/v1/environments/e1/credentials": () => json([]),
+      "PUT /api/v1/environments/e1/credentials": () => json({ id: "c1", app_role: "sso", kind: "login" }),
+    });
+    mount();
+    await openTab("Credenciais");
+    await userEvent.type(await screen.findByLabelText(/Nome do usuário/), "sso");
+    await userEvent.type(screen.getByLabelText(/Login/), "ana@x.com");
+    expect(screen.getByLabelText(/Senha/)).not.toBeRequired();
+    await userEvent.click(screen.getByRole("button", { name: /Salvar credencial/ }));
+    await waitFor(() => expect(calls).toContainEqual({ path: "/api/v1/environments/e1/credentials", method: "PUT", body: { app_role: "sso", kind: "login", payload: { username: "ana@x.com" } } }));
+  });
+
+  it("exclui uma credencial", async () => {
+    const calls = stub({
+      "GET /api/v1/environments/e1/credentials": () => json([{ id: "c0", app_role: "operator", kind: "login" }]),
+      "DELETE /api/v1/credentials/c0": () => new Response(null, { status: 204 }),
+    });
+    mount();
+    await openTab("Credenciais");
+    await userEvent.click(await screen.findByRole("button", { name: /Excluir operator/ }));
+    await waitFor(() => expect(calls).toContainEqual({ path: "/api/v1/credentials/c0", method: "DELETE", body: undefined }));
+  });
+
   it("cria um token de CI e mostra o segredo uma única vez; lista e revoga", async () => {
     const calls = stub({
       "GET /api/v1/projects/p1/tokens": () => json([{ id: "t1", name: "pipeline", scopes: ["run:create", "run:read"], last_used_at: null }]),

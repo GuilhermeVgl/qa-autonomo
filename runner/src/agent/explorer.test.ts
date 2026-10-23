@@ -8,7 +8,7 @@ import type { Uploader } from "./regression.js";
 import type { Planner } from "./planner.js";
 import { EventSink } from "./sink.js";
 
-type Site = Record<string, { sig: string; links?: string[]; status?: number; labels?: Record<string, string>; softError?: string }>;
+type Site = Record<string, { sig: string; links?: string[]; chromeLinks?: string[]; status?: number; labels?: Record<string, string>; softError?: string }>;
 
 const BASE = "https://app.test";
 
@@ -31,7 +31,7 @@ class FakeDriver implements Driver {
           url,
           status: page.status ?? 200,
           domSignature: page.sig,
-          links: (page.links ?? []).map((href) => ({ href: new URL(href, BASE).toString(), label: page.labels?.[href] ?? "link" })),
+          links: (page.links ?? []).map((href) => ({ href: new URL(href, BASE).toString(), label: page.labels?.[href] ?? "link", ...(page.chromeLinks?.includes(href) ? { chrome: true } : {}) })),
           ...(page.softError ? { softError: page.softError } : {}),
         };
       },
@@ -82,6 +82,22 @@ describe("explore", () => {
     expect(edges.filter((e) => e.payload.key === "link /orders/:id")).toHaveLength(1);
     expect(summary.pages).toBe(6);
     expect(nodes.every((n) => n.payload.app_role === "admin" && n.payload.kind === "page")).toBe(true);
+  });
+
+  it("maps a reusable sidebar/header once, not from every page", async () => {
+    const s: Site = {
+      "/": { sig: "home", links: ["/contratos", "/manutencao"], chromeLinks: ["/contratos", "/manutencao"] },
+      "/contratos": { sig: "c", links: ["/contratos", "/manutencao", "/contratos/1"], chromeLinks: ["/contratos", "/manutencao"] },
+      "/manutencao": { sig: "m", links: ["/contratos", "/manutencao"], chromeLinks: ["/contratos", "/manutencao"] },
+      "/contratos/1": { sig: "cd" },
+    };
+    const { edges, nodes } = await run(new FakeDriver({ "*": s }));
+    // the sidebar links to contratos/manutencao are mapped once (from home), not re-emitted from every page
+    expect(edges.filter((e) => e.payload.key === "link /contratos")).toHaveLength(1);
+    expect(edges.filter((e) => e.payload.key === "link /manutencao")).toHaveLength(1);
+    // the content link inside /contratos is still mapped
+    expect(edges.some((e) => e.payload.key === "link /contratos/:id")).toBe(true);
+    expect(nodes.map((n) => n.payload.label).sort()).toEqual(["/", "/contratos", "/contratos/:id", "/manutencao"]);
   });
 
   it("visits at most 3 samples per route pattern", async () => {

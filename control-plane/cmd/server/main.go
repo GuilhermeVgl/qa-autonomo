@@ -18,6 +18,8 @@ import (
 	"github.com/kpmg/agent-qa/control-plane/internal/autospec"
 	"github.com/kpmg/agent-qa/control-plane/internal/brief"
 	"github.com/kpmg/agent-qa/control-plane/internal/bug"
+	"github.com/kpmg/agent-qa/control-plane/internal/capability"
+	"github.com/kpmg/agent-qa/control-plane/internal/capture"
 	"github.com/kpmg/agent-qa/control-plane/internal/ci"
 	"github.com/kpmg/agent-qa/control-plane/internal/config"
 	"github.com/kpmg/agent-qa/control-plane/internal/database"
@@ -121,6 +123,8 @@ func serve(log *slog.Logger) error {
 	auth.RegisterConfig(mux, auth.ClientConfig{Mode: cfg.AuthMode, Issuer: cfg.OIDCIssuer, ClientID: cfg.OIDCClient})
 	hub := events.NewHub(pool, graph.NotifyChannel)
 	go func() { _ = hub.Run(ctx) }()
+	captureHub := capture.NewHub(pool, box)
+	go captureHub.Run(ctx)
 
 	project.Register(mux, mw, pool)
 	environment.Register(mux, mw, pool, box)
@@ -134,11 +138,13 @@ func serve(log *slog.Logger) error {
 	bug.Register(mux, mw, pool)
 	report.Register(mux, mw, pool)
 	brief.Register(mux, mw, pool, briefLLM, brief.Capabilities{LLM: briefLLM != nil, Storage: store != nil})
+	capability.Register(mux, mw, pool)
 	apitoken.Register(mux, mw, pool)
-	ci.Register(mux, pool, cfg.PublicURL)
+	ci.Register(mux, pool, box, cfg.PublicURL)
+	capture.Register(mux, mw, pool, captureHub)
 	schedule.Register(mux, mw, pool)
 	go schedule.Loop(ctx, pool, log, 30*time.Second)
-	runnerapi.Register(mux, pool, runnerapi.Deps{Box: box, BootstrapToken: cfg.RunnerBootstrapToken, OrganizationID: o.ID, LLM: runnerLLM, Storage: store})
+	runnerapi.Register(mux, pool, runnerapi.Deps{Box: box, Capture: captureHub, BootstrapToken: cfg.RunnerBootstrapToken, OrganizationID: o.ID, LLM: runnerLLM, Storage: store})
 	if cfg.RunnerBootstrapToken == "" {
 		log.Warn("RUNNER_BOOTSTRAP_TOKEN not set: runner registration disabled")
 	}

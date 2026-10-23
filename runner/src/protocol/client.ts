@@ -1,4 +1,4 @@
-import { chatResponseSchema, heartbeatResponseSchema, jobSchema, registerResponseSchema, type Job, type RunSummary, type RunnerEvent } from "./schemas.js";
+import { chatResponseSchema, heartbeatResponseSchema, jobSchema, registerResponseSchema, captureSessionSchema, capturePollSchema, type CaptureSession, type CapturePoll, type Job, type RunSummary, type RunnerEvent } from "./schemas.js";
 
 export class HttpError extends Error {
   constructor(
@@ -56,6 +56,39 @@ export class ControlPlaneClient {
 
   async complete(runId: string, status: "succeeded" | "failed", summary: RunSummary): Promise<void> {
     await post(this.baseUrl, `/runner/v1/jobs/${runId}/complete`, this.token, { status, summary });
+  }
+
+  /** Long-polls for a remote-browser capture session to drive; null when none is available. */
+  async leaseCapture(waitMs: number): Promise<CaptureSession | null> {
+    const res = await post(this.baseUrl, `/runner/v1/capture/lease?wait=${waitMs}`, this.token);
+    if (res.status === 204) return null;
+    return captureSessionSchema.parse(await res.json());
+  }
+
+  /** Uploads one JPEG frame of the capture browser's screen. */
+  async captureFrame(id: string, jpeg: Uint8Array): Promise<void> {
+    const body = jpeg.buffer.slice(jpeg.byteOffset, jpeg.byteOffset + jpeg.byteLength) as ArrayBuffer;
+    const res = await fetch(this.baseUrl + `/runner/v1/capture/${id}/frame`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${this.token}`, "content-type": "image/jpeg" },
+      body,
+    });
+    if (!res.ok) throw new HttpError(res.status, `/runner/v1/capture/${id}/frame`);
+  }
+
+  /** Long-polls for the person's input and control flags (finish/cancel). */
+  async capturePoll(id: string, waitMs: number): Promise<CapturePoll> {
+    const res = await post(this.baseUrl, `/runner/v1/capture/${id}/poll?wait=${waitMs}`, this.token);
+    return capturePollSchema.parse(await res.json());
+  }
+
+  /** Hands the captured storageState (authenticated session) to the control plane. */
+  async captureResult(id: string, state: string): Promise<void> {
+    await post(this.baseUrl, `/runner/v1/capture/${id}/result`, this.token, { state });
+  }
+
+  async captureFailed(id: string): Promise<void> {
+    await post(this.baseUrl, `/runner/v1/capture/${id}/failed`, this.token);
   }
 }
 

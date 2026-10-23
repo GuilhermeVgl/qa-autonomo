@@ -7,10 +7,12 @@ beforeEach(() => {
 });
 
 describe("parseHash", () => {
-  it("maps addresses to pages, with the overview as the default", () => {
-    expect(parseHash("")).toEqual({ page: "overview", sub: undefined });
+  it("maps addresses to pages, with product as the default when there is no hash", () => {
+    expect(parseHash("")).toEqual({ page: "product", sub: undefined });
+    expect(parseHash("#")).toEqual({ page: "product", sub: undefined });
     expect(parseHash("#/")).toEqual({ page: "overview", sub: undefined });
     expect(parseHash("#/mapa")).toEqual({ page: "map", sub: undefined });
+    expect(parseHash("#/produto")).toEqual({ page: "product", sub: undefined });
     expect(parseHash("#/specs")).toEqual({ page: "specs", sub: undefined });
     expect(parseHash("#/bugs")).toEqual({ page: "bugs", sub: undefined });
     expect(parseHash("#/execucoes")).toEqual({ page: "runs", sub: undefined });
@@ -29,7 +31,7 @@ describe("parseHash", () => {
 describe("useRoute", () => {
   it("follows the address bar and navigates with go()", async () => {
     const { result } = renderHook(() => useRoute());
-    expect(result.current.page).toBe("overview");
+    expect(result.current.page).toBe("product");
     act(() => result.current.go("map"));
     expect(window.location.hash).toBe("#/mapa");
     expect(result.current.page).toBe("map");

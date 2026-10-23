@@ -25,11 +25,12 @@ import (
 
 // Scopes a project token may carry.
 const (
-	ScopeRunCreate = "run:create"
-	ScopeRunRead   = "run:read"
+	ScopeRunCreate       = "run:create"
+	ScopeRunRead         = "run:read"
+	ScopeCredentialWrite = "credential:write"
 )
 
-var validScopes = map[string]bool{ScopeRunCreate: true, ScopeRunRead: true}
+var validScopes = map[string]bool{ScopeRunCreate: true, ScopeRunRead: true, ScopeCredentialWrite: true}
 
 const prefix = "qat_"
 

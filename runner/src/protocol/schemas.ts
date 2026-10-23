@@ -71,7 +71,7 @@ export const jobSchema = z.object({
   credentials: z.array(
     z.object({
       app_role: z.string(),
-      kind: z.enum(["login", "api_token"]),
+      kind: z.enum(["login", "api_token", "session"]),
       payload: z.record(z.string(), z.string()),
     }),
   ),
@@ -134,3 +134,31 @@ export interface RunSummary {
 export const chatResponseSchema = z.object({
   choices: z.array(z.object({ message: z.object({ content: z.string() }) })).min(1),
 });
+
+// Remote-browser capture: a session the runner drives while a person logs in, then hands back the authenticated state.
+export const captureSessionSchema = z.object({
+  id: z.string(),
+  status: z.string(),
+  app_role: z.string(),
+  start_url: z.string(),
+});
+export type CaptureSession = z.infer<typeof captureSessionSchema>;
+
+export const captureInputSchema = z.object({
+  type: z.enum(["move", "click", "wheel", "key", "text"]),
+  x: z.number().optional(),
+  y: z.number().optional(),
+  button: z.string().optional(),
+  dy: z.number().optional(),
+  key: z.string().optional(),
+  text: z.string().optional(),
+});
+export type CaptureInput = z.infer<typeof captureInputSchema>;
+
+export const capturePollSchema = z.object({
+  events: z.array(captureInputSchema),
+  finish: z.boolean(),
+  cancel: z.boolean(),
+});
+export type CapturePoll = z.infer<typeof capturePollSchema>;
+

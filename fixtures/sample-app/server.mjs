@@ -25,6 +25,7 @@
 //   S5  redirecionamento aberto em /sec/go?next=                     S6  formulário POST sem token em /sec/notes
 //   S7  stack trace em /sec/boom   S8  /.env servido   S9  CORS reflete qualquer origem, com credenciais
 import { createServer } from "node:http";
+import { createHmac } from "node:crypto";
 
 const USERS = { admin: { password: "admin123", role: "admin" }, operator: { password: "op123", role: "operator" } };
 const orders = new Map([
@@ -36,6 +37,28 @@ const orders = new Map([
 export const state = { deletedOrders: [], labWrites: [], labCustomers: [], logouts: 0, secWrites: 0 };
 
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+
+// /otp aceita um código TOTP (RFC 6238) deste segredo, para o teste de segunda etapa com semente TOTP.
+export const OTP_SECRET = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ";
+function totpAt(secret, atMs) {
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+  let bits = 0, value = 0;
+  const bytes = [];
+  for (const ch of secret.replace(/[\s=]/g, "").toUpperCase()) {
+    value = (value << 5) | alphabet.indexOf(ch);
+    bits += 5;
+    if (bits >= 8) { bits -= 8; bytes.push((value >> bits) & 0xff); }
+  }
+  const buf = Buffer.alloc(8);
+  buf.writeBigUInt64BE(BigInt(Math.floor(atMs / 1000 / 30)));
+  const h = createHmac("sha1", Buffer.from(bytes)).update(buf).digest();
+  const o = h[h.length - 1] & 0x0f;
+  const bin = ((h[o] & 0x7f) << 24) | ((h[o + 1] & 0xff) << 16) | ((h[o + 2] & 0xff) << 8) | (h[o + 3] & 0xff);
+  return (bin % 1e6).toString().padStart(6, "0");
+}
+// aceita a janela atual e a anterior, para não falhar na virada dos 30s
+const totpOk = (code) => code === totpAt(OTP_SECRET, Date.now()) || code === totpAt(OTP_SECRET, Date.now() - 30000);
+
 
 function layout(role, title, body, mobile = false) {
   const adminLink = role === "admin" ? '<a href="/admin">Admin</a>' : "";
@@ -144,8 +167,19 @@ setTimeout(() => {
       return send(404, shell("Não encontrado", "<h1>Não encontrado</h1>"));
     }
     if (url.pathname === "/otp" || url.pathname.startsWith("/otp/")) {
+      if (url.pathname === "/otp" && cookieOf("otp_session")) return send(200, appHtml("/otp/app"));
       if (url.pathname === "/otp/code") return send(200, shell("Verificação", `<main><form method="post" action="/otp/verify"><input name="code" autocomplete="one-time-code" maxlength="6" placeholder="Código de verificação"><button type="submit">Verificar</button></form></main>`));
+      if (url.pathname === "/otp/verify" && req.method === "POST") {
+        return body$((b) => {
+          if (totpOk(new URLSearchParams(b).get("code") ?? "")) return send(302, "", { location: "/otp", "set-cookie": "otp_session=ok; Path=/; HttpOnly" });
+          send(401, shell("Verificação", `<main><form method="post" action="/otp/verify"><input name="code" autocomplete="one-time-code" maxlength="6"><button type="submit">Verificar</button></form><p class="error">Código inválido.</p></main>`));
+        });
+      }
       if (url.pathname === "/otp/login" && req.method === "POST") return body$(() => send(302, "", { location: "/otp/code" }));
+      if (url.pathname.startsWith("/otp/app")) {
+        if (!cookieOf("otp_session")) return send(302, "", { location: "/otp" });
+        return send(200, shell("Página", `<main><h1>${esc(url.pathname)}</h1><a href="/otp">Início</a></main>`));
+      }
       return send(200, shell("Entrar", `<main><form method="post" action="/otp/login"><input name="user" type="text" placeholder="Usuário"><input name="password" type="password"><button type="submit">Entrar</button></form></main>`));
     }
     if (url.pathname === "/cap") {

@@ -51,6 +51,23 @@ describe("collectInventory", () => {
     expect(inv.buttons.map((b) => `${b.kind}:${b.label}${b.disabled ? "!" : ""}`)).toEqual(["toggle:Mostrar mais", "summary:Filtros", "button:Inativo!", "tab:Aba"]);
   });
 
+  it("marks controls that live in the reusable chrome (header/sidebar/nav), not the ones in the content", () => {
+    const inv = page(`
+      <header><button type="button">Trocar de organização</button></header>
+      <nav><a href="/contratos">Contratos</a><form action="/busca" method="get"><input name="q"><button>Buscar</button></form></nav>
+      <aside role="complementary"><button type="button">Ajuda</button></aside>
+      <main>
+        <button type="button">Novo contrato</button>
+        <form action="/contratos" method="post"><input name="nome"><button type="submit">Salvar</button></form>
+      </main>`);
+    const chromeOf = (label: string) => inv.buttons.find((b) => b.label === label)?.chrome;
+    expect(chromeOf("Trocar de organização")).toBe(true);
+    expect(chromeOf("Ajuda")).toBe(true);
+    expect(chromeOf("Novo contrato")).toBeUndefined();
+    expect(inv.forms.find((f) => f.action === "/busca")?.chrome).toBe(true);
+    expect(inv.forms.find((f) => f.action === "/contratos")?.chrome).toBeUndefined();
+  });
+
   it("gives every element a stable handle the browser can find again", () => {
     const inv = page(HTML);
     const form = inv.forms[0];

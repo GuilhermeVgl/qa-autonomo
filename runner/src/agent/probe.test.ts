@@ -63,7 +63,7 @@ describe("probePage: what it does on a page", () => {
     ]);
     expect(s.performed.some((a) => a.type === "click" && a.ref === "b1")).toBe(false); // Sair
     expect(s.performed.some((a) => a.type === "submit" && a.formRef === "f3")).toBe(false); // password form
-    expect(res.skipped).toEqual({ never: 1, sensitive: 1, risky: 0 });
+    expect(res.skipped).toEqual({ never: 1, sensitive: 1, risky: 0, chrome: 0 });
   });
 
   it("fills with plausible data: the search gets a term, the create form valid values, the first try empty", async () => {
@@ -110,6 +110,52 @@ describe("probePage: what it does on a page", () => {
     const allowed = new FakeSession(inv);
     await probePage({ ...base, session: allowed, inventory: inv, policy: "allow" });
     expect(allowed.performed).toHaveLength(2);
+  });
+
+  it("never submits forms that change the logged-in user's own account", async () => {
+    const inv: Inventory = {
+      title: "Configurações", headings: ["Conta"], buttons: [],
+      forms: [
+        {
+          ref: "f0",
+          method: "PATCH",
+          action: "/profile",
+          label: "Meu perfil",
+          fields: [field("i0", "email", "email"), field("i1", "name", "text")],
+          submitRef: "b0",
+          submitLabel: "Salvar",
+          hasFile: false,
+          hasPassword: false,
+        },
+      ],
+    };
+    const s = new FakeSession(inv);
+    const res = await probePage({ ...base, session: s, inventory: inv, policy: "allow" });
+    expect(s.performed).toEqual([]);
+    expect(res.skipped.sensitive).toBe(1);
+  });
+
+  it("acts on a reusable-chrome control once, then skips it on later pages", async () => {
+    const inv: Inventory = {
+      title: "Contratos", headings: ["Contratos"],
+      buttons: [
+        { ref: "b0", label: "Trocar de organização", kind: "button", disabled: false, chrome: true },
+        { ref: "b1", label: "Novo contrato", kind: "button", disabled: false },
+      ],
+      forms: [],
+    };
+    const chromeSeen = new Set<string>();
+    // first page: the header button is tried, and its signature is remembered
+    const a = new FakeSession(inv);
+    const r1 = await probePage({ ...base, session: a, inventory: inv, chromeSeen });
+    expect(a.performed.map((x) => (x.type === "click" ? x.ref : ""))).toEqual(["b0", "b1"]);
+    expect(r1.skipped.chrome).toBe(0);
+    expect(chromeSeen.size).toBe(1);
+    // a later page with the same header: the chrome button is skipped, the content button still tried
+    const b = new FakeSession(inv);
+    const r2 = await probePage({ ...base, session: b, inventory: inv, chromeSeen });
+    expect(b.performed.map((x) => (x.type === "click" ? x.ref : ""))).toEqual(["b1"]);
+    expect(r2.skipped.chrome).toBe(1);
   });
 
   it("respects the action budget, cancellation and the deadline", async () => {

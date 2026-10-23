@@ -3,7 +3,7 @@ import { useMemo, useState } from "react";
 import { api, type Coverage, type RunStep } from "../api";
 import { NodeHistory } from "../cards";
 import { FlowChart } from "../FlowChart";
-import { boxFocus, boxTones, buildModel, detectJourneys, layoutFlow, requirementFlows, runFlow, screenDifferences, type Box, type Flow, type FlowOrigin } from "../flows";
+import { boxFocus, boxPossibilities, boxTones, buildModel, detectJourneys, layoutFlow, requirementFlows, runFlow, screenDifferences, type Box, type Flow, type FlowOrigin } from "../flows";
 import { Icon } from "../icons";
 import { roleColor } from "../roles";
 import { Picture, primaryNode, userLabel } from "../ScreenCard";
@@ -73,6 +73,12 @@ export function FlowsPage() {
   const layout = useMemo(() => (model && selected ? layoutFlow(model, selected) : undefined), [model, selected]);
   const focus = useMemo(() => (layout && selected ? boxFocus(layout, selected.results ?? ws.nodeResults) : {}), [layout, selected, ws.nodeResults]);
   const tones = useMemo(() => (layout && selected ? boxTones(layout, selected.results ?? ws.nodeResults, ws.nodeCoverage) : {}), [layout, selected, ws.nodeResults, ws.nodeCoverage]);
+  const possibilities = useMemo(() => {
+    if (!layout || !selected) return {};
+    const out: Record<string, ReturnType<typeof boxPossibilities>> = {};
+    for (const b of layout.boxes) out[b.id] = boxPossibilities(b, selected.results ?? ws.nodeResults);
+    return out;
+  }, [layout, selected, ws.nodeResults]);
 
   const header = <PageHeader title="Fluxos" subtitle="Cada fluxo mostra as telas por onde se passa, uma raia por usuário. A mesma tela com permissões diferentes aparece lado a lado." />;
 
@@ -190,9 +196,9 @@ export function FlowsPage() {
             </div>
             {!hasPictures && <p className="meta flow-note">As imagens das telas aparecem a partir da próxima exploração.</p>}
             <div className="flow-stage">
-              <FlowChart layout={layout} flowId={selected.id} tones={tones} focus={focus} token={ws.token} selectedBox={box?.id} onSelect={setBox} />
+              <FlowChart layout={layout} flowId={selected.id} tones={tones} focus={focus} possibilities={possibilities} token={ws.token} selectedBox={box?.id} onSelect={setBox} />
             </div>
-            {box && <BoxDetail box={box} tone={tones[box.id] ?? "neutral"} focusId={focus[box.id]} onClose={() => setBox(undefined)} />}
+            {box && <BoxDetail box={box} tone={tones[box.id] ?? "neutral"} focusId={focus[box.id]} possibilities={possibilities[box.id] ?? []} onClose={() => setBox(undefined)} />}
           </>
         ) : (
           <EmptyState icon="flow" title="Escolha um fluxo" text="A lista ao lado mostra o que o agente encontrou." />
@@ -211,7 +217,7 @@ function hasDifferences(model: ReturnType<typeof buildModel> | undefined, f: Flo
 }
 
 /** The selected screen up close: a larger picture, what it is for this user, what only this user has, and its history. */
-function BoxDetail({ box, tone, focusId, onClose }: { box: Box; tone: Tone; focusId: string | undefined; onClose: () => void }) {
+function BoxDetail({ box, tone, focusId, possibilities, onClose }: { box: Box; tone: Tone; focusId: string | undefined; possibilities: ReturnType<typeof boxPossibilities>; onClose: () => void }) {
   const ws = useWorkspace();
   const node = primaryNode(box.nodes, focusId);
   const others = Object.keys(box.screen.cells).filter((u) => u !== box.user);
@@ -262,6 +268,20 @@ function BoxDetail({ box, tone, focusId, onClose }: { box: Box; tone: Tone; focu
                 Só {userLabel(u)} tem: {list.join(", ")}
               </p>
             ))}
+          {possibilities.length > 0 && (
+            <div>
+              <h3>Possibilidades desta tela</h3>
+              <ul className="rows-plain">
+                {possibilities.map((p) => (
+                  <li key={p.id}>
+                    <span className={`dot tone-${p.result === "untested" ? "covered" : p.result === "pass" ? "passed" : p.result === "skipped" ? "skipped" : "failing"}`} />
+                    <span>{p.label}</span>
+                    <span className="meta">{p.result === "untested" ? "não testado" : p.result === "pass" ? "passou" : p.result === "skipped" ? "pulado" : "falhou"}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           {node && <NodeHistory nodeId={node.id} token={ws.token} />}
         </>
       )}

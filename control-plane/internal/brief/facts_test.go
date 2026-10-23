@@ -86,6 +86,33 @@ func TestAnalyze_CoverageSaysWhatIsLinkedAndWhatIsNot(t *testing.T) {
 	}
 }
 
+func TestAnalyze_BuildsCapabilityCoverageFromScreensAndLatestNodeResults(t *testing.T) {
+	w := shop()
+	w.in.NodeResults = map[uuid.UUID]string{
+		w.nodes["list-a"]: "fail",
+		w.nodes["list-o"]: "pass",
+		w.nodes["show-a"]: "pass",
+		w.nodes["adm-a"]:  "skipped",
+	}
+	f := analyze(w.in)
+	if f.Capabilities.Total != 3 || f.Capabilities.Covered != 1 || f.Capabilities.Tested != 2 || f.Capabilities.Failing != 1 {
+		t.Fatalf("capabilities summary = %+v", f.Capabilities)
+	}
+	by := map[string]CapabilityItem{}
+	for _, c := range f.Capabilities.List {
+		by[c.Key] = c
+	}
+	if got := by["orders"]; got.Status != "fail" || got.Screens != 2 || got.ScreensCovered != 2 || got.ScreensTested != 2 {
+		t.Errorf("orders capability = %+v", got)
+	}
+	if got := by["admin"]; got.Status != "skipped" || got.ScreensTested != 1 {
+		t.Errorf("admin capability = %+v", got)
+	}
+	if got := by["help"]; got.Status != "untested" || got.ScreensTested != 0 {
+		t.Errorf("help capability = %+v", got)
+	}
+}
+
 func TestAnalyze_AlternativeFlowsAreTheScreensNotEveryUserReaches(t *testing.T) {
 	f := analyze(shop().in)
 	got := map[string][]string{}

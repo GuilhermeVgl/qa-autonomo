@@ -1,4 +1,4 @@
-import { chromium, devices, type Browser, type BrowserContext, type Page, type Request } from "playwright";
+import { chromium, devices, type Browser, type BrowserContext, type BrowserContextOptions, type Page, type Request } from "playwright";
 import { effectiveMethod, formEncodedFields } from "../../agent/controls.js";
 import { isAllowedUrl, type DestructivePolicy } from "../../agent/guards.js";
 import type { Credential, Driver, LoginFailure, PageView, Session } from "../../agent/explorer.js";
@@ -9,6 +9,7 @@ import { collectPageFacts } from "../../security/pagefacts.js";
 import type { CookieFlag, PageFacts, ProbeOutcome, RawResponse } from "../../security/types.js";
 import { collectInventory } from "./inventory.js";
 import { performLogin } from "./login.js";
+import { analyzeLoginPage } from "./loginpage.js";
 import { detectSoftError } from "./softerror.js";
 
 const NAV_TIMEOUT_MS = 15_000;
@@ -57,13 +58,25 @@ export class BrowserDriver implements Driver {
 
   async newSession(role: string, credential: Credential | undefined): Promise<Session | null> {
     const emulation = this.scope.device ? devices[this.scope.device] : undefined;
-    const context = await this.browser.newContext({ ...emulation, ignoreHTTPSErrors: false });
+    // kind=session: start the context already authenticated, bypassing any login flow (SSO, 2FA, captcha).
+    let storageState: BrowserContextOptions["storageState"];
+    if (credential?.kind === "session") {
+      try {
+        storageState = JSON.parse(credential.payload["state"] ?? "") as BrowserContextOptions["storageState"];
+      } catch {
+        this.loginFailures.set(role, { reason: "session_expired", message: "a sessão salva está corrompida: recapture com `npm run capture`" });
+        return null;
+      }
+    }
+    const context = await this.browser.newContext({ ...emulation, ignoreHTTPSErrors: false, storageState });
+    const blockedLoginHosts = new Set<string>();
     const watch: Watch = { active: false, guardWrites: false, acceptDialogs: false, requests: new Map(), dialog: null };
     await context.route("**/*", (route) => {
       const req = route.request();
       const url = req.url();
       if (!isAllowedUrl(url, this.scope.allowed_hosts)) {
         this.blockedRequests.add(url);
+        if (isLoginRelevantBlock(req)) blockedLoginHosts.add(hostOf(url));
         return route.abort("blockedbyclient");
       }
       if (!watch.active) return route.continue();
@@ -113,8 +126,17 @@ export class BrowserDriver implements Driver {
     if (credential?.kind === "api_token") {
       const token = credential.payload["token"];
       if (token) await context.setExtraHTTPHeaders({ authorization: `Bearer ${token}` });
+    } else if (credential?.kind === "session") {
+      // the saved session may have expired: if the home page shows a login wall, it no longer authenticates.
+      const expired = await sessionExpired(page, this.scope.base_url);
+      if (expired) {
+        this.loginFailures.set(role, { reason: "session_expired", message: "a sessão salva expirou: recapture com `npm run capture`" });
+        await context.close();
+        return null;
+      }
+      this.loginFailures.delete(role);
     } else if (credential?.kind === "login") {
-      const outcome = await performLogin(page, this.scope.base_url, credential.payload, { blockedHosts: () => [...this.blockedRequests].map((u) => hostOf(u)) });
+      const outcome = await performLogin(page, this.scope.base_url, credential.payload, { blockedHosts: () => [...blockedLoginHosts] });
       if (!outcome.ok) {
         this.loginFailures.set(role, { reason: outcome.reason, message: outcome.message });
         await context.close();
@@ -142,6 +164,31 @@ const hostOf = (url: string): string => {
     return url;
   }
 };
+
+const isLoginRelevantBlock = (req: Request): boolean => {
+  if (req.isNavigationRequest()) return true;
+  const type = req.resourceType();
+  return type === "document" || type === "xhr" || type === "fetch";
+};
+
+/** Whether a saved session no longer authenticates: the home page offers a way to log in (form, first step, or a link). */
+async function sessionExpired(page: Page, baseUrl: string): Promise<boolean> {
+  try {
+    await page.goto(baseUrl, { waitUntil: "load" });
+    await page.waitForLoadState("networkidle", { timeout: 2500 }).catch(() => undefined);
+  } catch {
+    return false; // a navigation error here is not an expiry; the run's health checks handle the app being down
+  }
+  for (let i = 0; i < 5; i++) {
+    try {
+      const a = (await page.evaluate(`(${analyzeLoginPage.toString()})(document, location.href, false)`)) as { hasPassword: boolean; firstStep: boolean; loginLink: unknown };
+      return a.hasPassword || a.firstStep || a.loginLink !== null;
+    } catch {
+      await sleep(200);
+    }
+  }
+  return false;
+}
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const REF = /^[a-z]\d{1,4}$/; // refs are handed out by collectInventory; nothing else may reach a selector
@@ -184,14 +231,25 @@ class BrowserSession implements Session {
     await this.stabilize();
     const snapshot = await this.page.evaluate(`(() => {
       const sig = (${domSignature.toString()})(document.body);
+      const chromeSel = "header, nav, aside, [role=banner], [role=navigation], [role=complementary], [role=menubar]";
+      const isChrome = (el) => {
+        if (el.closest(chromeSel)) return true;
+        let p = el;
+        for (let i = 0; p && i < 10; i++, p = p.parentElement) {
+          const pos = getComputedStyle(p).position;
+          if (pos === "fixed" || pos === "sticky") return true;
+        }
+        return false;
+      };
       const links = [...document.querySelectorAll("a[href]")].map((a) => ({
         href: a.href,
         label: (a.getAttribute("aria-label") || a.textContent || "").trim().slice(0, 120),
+        chrome: isChrome(a),
       }));
       const soft = (${detectSoftError.toString()})(document);
       return { sig, links, soft };
     })()`);
-    const { sig, links, soft } = snapshot as { sig: string; links: { href: string; label: string }[]; soft: string | null };
+    const { sig, links, soft } = snapshot as { sig: string; links: { href: string; label: string; chrome?: boolean }[]; soft: string | null };
     const status = response?.status() ?? 0;
     const security = opts?.security ? await this.readSecurity(response) : undefined;
     return { url: this.page.url(), status, domSignature: sig, links, ...(soft && status < 400 ? { softError: soft } : {}), ...(security ? { security } : {}) };

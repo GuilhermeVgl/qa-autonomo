@@ -31,6 +31,7 @@ import (
 
 	"github.com/kpmg/agent-qa/control-plane/internal/autospec"
 	"github.com/kpmg/agent-qa/control-plane/internal/bug"
+	"github.com/kpmg/agent-qa/control-plane/internal/capture"
 	"github.com/kpmg/agent-qa/control-plane/internal/environment"
 	"github.com/kpmg/agent-qa/control-plane/internal/events"
 	"github.com/kpmg/agent-qa/control-plane/internal/graph"
@@ -58,6 +59,7 @@ type Deps struct {
 	Storage        Storage
 	LLM            Completer
 	Box            *secret.Box
+	Capture        *capture.Hub
 	BootstrapToken string // empty disables registration
 	OrganizationID uuid.UUID
 	PollInterval   time.Duration // long-poll check interval (default 1s)
@@ -123,6 +125,10 @@ func Register(mux *http.ServeMux, pool *pgxpool.Pool, d Deps) {
 		})
 	}
 	runnerOf := func(r *http.Request) Runner { return r.Context().Value(ctxKey{}).(Runner) }
+
+	if d.Capture != nil {
+		registerCapture(mux, auth, runnerOf, d.Capture)
+	}
 
 	mux.HandleFunc("POST /runner/v1/register", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {

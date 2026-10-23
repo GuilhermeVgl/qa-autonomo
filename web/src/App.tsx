@@ -15,6 +15,7 @@ import { WorkspaceProvider, useWorkspace } from "./workspace";
 import { FlowsPage } from "./pages/FlowsPage";
 import { MapPage } from "./pages/MapPage";
 import { Overview } from "./pages/Overview";
+import { ProductPage } from "./pages/ProductPage";
 import { SpecsPage } from "./pages/SpecsPage";
 import { RunsPage } from "./pages/RunsPage";
 import { BugsPage } from "./pages/BugsPage";
@@ -156,7 +157,8 @@ function ThemeSwitch() {
 
 const NAV: { page: Page; label: string; icon: IconName; hash: string }[] = [
   { page: "overview", label: "Visão geral", icon: "home", hash: "#/" },
-  { page: "map", label: "Mapa", icon: "node", hash: "#/mapa" },
+  { page: "product", label: "Produto", icon: "sparkles", hash: "#/produto" },
+  { page: "map", label: "Mapa técnico", icon: "node", hash: "#/mapa" },
   { page: "flows", label: "Fluxos", icon: "flow", hash: "#/fluxos" },
   { page: "specs", label: "Especificações", icon: "file", hash: "#/specs" },
   { page: "bugs", label: "Bugs", icon: "bug", hash: "#/bugs" },
@@ -164,7 +166,7 @@ const NAV: { page: Page; label: string; icon: IconName; hash: string }[] = [
   { page: "settings", label: "Configurações", icon: "sliders", hash: "#/config" },
 ];
 
-const TITLES: Record<Page, string> = { overview: "Visão geral", map: "Mapa da aplicação", flows: "Fluxos", specs: "Especificações", bugs: "Bugs", runs: "Execuções", settings: "Configurações" };
+const TITLES: Record<Page, string> = { overview: "Visão geral", product: "Produto", map: "Mapa da aplicação", flows: "Fluxos", specs: "Especificações", bugs: "Bugs", runs: "Execuções", settings: "Configurações" };
 
 function Shell({ onLogout }: { onLogout: () => void }) {
   const ws = useWorkspace();
@@ -292,6 +294,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
         <EnvAlert />
         <div className={`page-host${page === "map" || page === "flows" ? " is-map" : ""}`}>
           {page === "overview" && <Overview />}
+          {page === "product" && <ProductPage />}
           {page === "map" && <MapPage />}
           {page === "flows" && <FlowsPage />}
           {page === "specs" && <SpecsPage />}

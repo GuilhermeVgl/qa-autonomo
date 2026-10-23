@@ -163,18 +163,74 @@ func TestCredentials_Validation(t *testing.T) {
 	bad := []map[string]any{
 		{"app_role": "", "kind": "login", "payload": map[string]string{"username": "a", "password": "b"}},
 		{"app_role": "admin", "kind": "oauth", "payload": map[string]string{"x": "y"}},
-		{"app_role": "admin", "kind": "login", "payload": map[string]string{"username": "a"}},
+		{"app_role": "admin", "kind": "login", "payload": map[string]string{"password": "b"}}, // username is required
 		{"app_role": "admin", "kind": "api_token", "payload": map[string]string{"username": "a"}},
+		{"app_role": "admin", "kind": "session", "payload": map[string]string{"x": "y"}},
 	}
 	for i, b := range bad {
 		if c := h.Do("PUT", path, owner, b).Code; c != http.StatusBadRequest {
 			t.Errorf("case %d = %d, want 400", i, c)
 		}
 	}
+	// a login with only the user (no password) is accepted: SSO and first-step/magic-link flows need just the user
+	if c := h.Do("PUT", path, owner, map[string]any{"app_role": "sso", "kind": "login", "payload": map[string]string{"username": "ana@x.com"}}).Code; c != http.StatusOK {
+		t.Errorf("username-only login put = %d, want 200", c)
+	}
+	// a captured session is accepted and stored like any other credential
+	okSession := map[string]any{"app_role": "admin", "kind": "session", "payload": map[string]string{"state": `{"cookies":[],"origins":[]}`}}
+	if c := h.Do("PUT", path, owner, okSession).Code; c != http.StatusOK {
+		t.Errorf("session put = %d, want 200", c)
+	}
 	viewer := h.Login("v@x.com", "viewer")
 	ok := map[string]any{"app_role": "a", "kind": "api_token", "payload": map[string]string{"token": "t"}}
 	if c := h.Do("PUT", path, viewer, ok).Code; c != http.StatusForbidden {
 		t.Errorf("viewer put = %d, want 403", c)
+	}
+}
+
+func TestCredentials_Delete(t *testing.T) {
+	h, owner, pid := setup(t)
+	var e env
+	h.JSON(h.Do("POST", "/api/v1/projects/"+pid+"/environments", owner,
+		map[string]any{"name": "hml", "base_url": "https://hml.example.com"}), &e)
+	path := "/api/v1/environments/" + e.ID + "/credentials"
+	if c := h.Do("PUT", path, owner, map[string]any{"app_role": "admin", "kind": "login", "payload": map[string]string{"username": "a", "password": "b"}}).Code; c != http.StatusOK {
+		t.Fatalf("put = %d", c)
+	}
+	var creds []struct {
+		ID      string `json:"id"`
+		AppRole string `json:"app_role"`
+	}
+	h.JSON(h.Do("GET", path, owner, nil), &creds)
+	if len(creds) != 1 {
+		t.Fatalf("creds = %+v", creds)
+	}
+	// a viewer cannot delete
+	if c := h.Do("DELETE", "/api/v1/credentials/"+creds[0].ID, h.Login("v@x.com", "viewer"), nil).Code; c != http.StatusForbidden {
+		t.Errorf("viewer delete = %d, want 403", c)
+	}
+	// an owner can, and it is gone and audited
+	if c := h.Do("DELETE", "/api/v1/credentials/"+creds[0].ID, owner, nil).Code; c != http.StatusNoContent {
+		t.Fatalf("delete = %d", c)
+	}
+	var left []any
+	h.JSON(h.Do("GET", path, owner, nil), &left)
+	if len(left) != 0 {
+		t.Errorf("after delete = %+v", left)
+	}
+	// deleting again is 404
+	if c := h.Do("DELETE", "/api/v1/credentials/"+creds[0].ID, owner, nil).Code; c != http.StatusNotFound {
+		t.Errorf("delete again = %d, want 404", c)
+	}
+	entries, _ := audit.New(h.Pool).ListAudit(context.Background(), audit.ListAuditParams{OrganizationID: h.OrgID, Limit: 50})
+	var deleted bool
+	for _, en := range entries {
+		if en.Action == "credential.delete" {
+			deleted = true
+		}
+	}
+	if !deleted {
+		t.Error("credential.delete not audited")
 	}
 }
 

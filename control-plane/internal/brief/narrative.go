@@ -78,6 +78,9 @@ func Template(f Facts) Narrative {
 		n.ExecutiveSummary = fmt.Sprintf("O ambiente %s do projeto %s ainda não foi explorado: não há telas mapeadas, cobertura nem resultados de teste. O primeiro passo é explorar a aplicação.", f.Environment.Name, f.Project)
 	} else {
 		summary := fmt.Sprintf("No ambiente %s do projeto %s foram mapeadas %s por %s. ", f.Environment.Name, f.Project, plural(f.Map.Screens, "tela", "telas"), plural(len(f.Users), "usuário", "usuários"))
+		if f.Capabilities.Total > 0 {
+			summary += fmt.Sprintf("A visão de produto tem %s, com %d testadas e %d com falha. ", plural(f.Capabilities.Total, "capacidade", "capacidades"), f.Capabilities.Tested, f.Capabilities.Failing)
+		}
 		summary += fmt.Sprintf("%d%% dos requisitos (%d de %d) estão ligados a telas e %d%% das telas têm requisito. ", f.Coverage.PercentRequirements, f.Coverage.Linked, f.Coverage.Requirements, f.Coverage.PercentScreens)
 		if r := f.Regression; r != nil {
 			summary += fmt.Sprintf("A última regressão teve %d aprovadas e %d reprovadas. ", r.Passed, r.Failed+r.Errored)
@@ -148,6 +151,14 @@ func Template(f Facts) Narrative {
 			u = append(u, reqLabel(r.Key, r.Text))
 		}
 		cov.WriteString("\n\nRequisitos sem tela:\n" + list(u, 8))
+	}
+	if f.Capabilities.Total > 0 {
+		cov.WriteString(fmt.Sprintf("\n\nCapacidades: **%d** no total, **%d** com telas cobertas por requisitos, **%d** já testadas e **%d** com falha.", f.Capabilities.Total, f.Capabilities.Covered, f.Capabilities.Tested, f.Capabilities.Failing))
+		var caps []string
+		for _, c := range f.Capabilities.List {
+			caps = append(caps, fmt.Sprintf("%s: %d tela(s), %d coberta(s), %d testada(s), status %s", c.Name, c.Screens, c.ScreensCovered, c.ScreensTested, statusLabel(c.Status)))
+		}
+		cov.WriteString("\n\n" + list(caps, 10))
 	}
 	body["coverage"] = cov.String()
 
@@ -324,6 +335,21 @@ func critLabel(s string) string {
 		return "alto"
 	}
 	return "normal"
+}
+
+func statusLabel(s string) string {
+	switch s {
+	case "pass":
+		return "passou"
+	case "fail":
+		return "falhou"
+	case "error":
+		return "erro"
+	case "skipped":
+		return "pulada"
+	default:
+		return "não testada"
+	}
 }
 
 func recommendations(f Facts) []string {

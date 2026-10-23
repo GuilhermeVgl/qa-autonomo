@@ -1,18 +1,19 @@
 import { describe, expect, it } from "vitest";
 import type { GraphData, GraphEdge, GraphNode } from "./api";
-import { BOX_H, BOX_W, ENDPOINT_H, MAX_ROWS, arrowText, boxFocus, boxTones, buildModel, detectJourneys, layoutFlow, requirementFlows, runFlow, screenDifferences } from "./flows";
+import { BOX_H, BOX_W, ENDPOINT_H, MAX_ROWS, arrowText, boxFocus, boxPossibilities, boxTones, buildModel, detectJourneys, layoutFlow, requirementFlows, runFlow, screenDifferences } from "./flows";
 
 const node = (id: string, kind: string, label: string, roles: string[], metadata: Record<string, unknown> = {}): GraphNode => ({ id, kind, label, app_roles: roles, metadata });
 const edge = (id: string, from: string, to: string, role: string, action: Record<string, unknown>): GraphEdge => ({ id, from_node_id: from, to_node_id: to, key: id, action, app_roles: [role] });
 
 const controls = (...labels: string[]) => ({ controls: labels.map((label) => ({ label })) });
+const forms = (...defs: Array<{ label: string; method: string; action: string }>) => ({ forms: defs.map((d) => ({ ...d })) });
 
 const GRAPH: GraphData = {
   graph: { id: "g", version: 1 },
   nodes: [
     node("home-a", "page", "/", ["admin"]),
-    node("cl-a", "page", "/clients", ["admin"], controls("Novo cliente", "Excluir cliente")),
-    node("cl-o", "page", "/clients", ["operador"], controls("Novo cliente")),
+    node("cl-a", "page", "/clients", ["admin"], { ...controls("Novo cliente", "Excluir cliente"), ...forms({ label: "Novo cliente", method: "POST", action: "/clients" }) }),
+    node("cl-o", "page", "/clients", ["operador"], { ...controls("Novo cliente"), ...forms({ label: "Buscar clientes", method: "GET", action: "/clients" }) }),
     node("modal-a", "modal", "/clients › Novo cliente", ["admin"]),
     node("modal-o", "modal", "/clients › Novo cliente", ["operador"]),
     node("post", "endpoint", "POST /clients", ["admin", "operador"]),
@@ -64,19 +65,19 @@ describe("detectJourneys", () => {
   const m = buildModel(GRAPH);
   const journeys = detectJourneys(m);
 
-  it("finds the story of a screen where something can be done, and leaves plain links out", () => {
-    expect(journeys.map((j) => j.title)).toEqual(["/clients"]); // "/" and "/admin" only have links
+  it("finds stories from screens with outgoing possibilities, including navigation", () => {
+    expect(journeys.map((j) => j.title)).toEqual(["/", "/clients"]);
     const j = journeys[0];
-    expect(j?.screens).toEqual(["page|/clients", "modal|/clients › Novo cliente", "page|/clients/:id", "endpoint|POST /clients"]);
-    expect(j?.transitions.every((t) => t.kind !== "link")).toBe(true);
-    expect(j?.subtitle).toContain("abre “Novo cliente”");
+    expect(j?.screens).toEqual(["page|/", "page|/clients", "page|/admin", "modal|/clients › Novo cliente", "page|/clients/:id"]);
+    expect(j?.transitions.some((t) => t.kind === "link")).toBe(true);
+    expect(j?.subtitle).toContain("vai para “Clientes”");
     expect(j?.origin).toBe("journey");
   });
 
   it("knows which users the flow involves and how many screens not all of them reach", () => {
-    const j = journeys[0];
+    const j = journeys.find((f) => f.title === "/clients");
     expect(j?.users).toEqual(["admin", "operador"]);
-    expect(j?.partial).toBe(1); // /clients/:id is only for the admin (the modal and the endpoint are shared)
+    expect(j?.partial).toBe(3);
   });
 });
 
@@ -89,9 +90,8 @@ describe("flows and specifications", () => {
 
   it("counts the screens of a flow that no requirement talks about", () => {
     const model = buildModel(g);
-    const [journey] = detectJourneys(model);
-    // /clients is covered (for both users); the modal and the endpoint are not screens to cover; /clients/:id is not covered
-    expect(journey?.uncovered).toEqual(["page|/clients/:id"]);
+    const journey = detectJourneys(model).find((f) => f.title === "/clients");
+    expect(journey?.uncovered).toEqual(["page|/", "page|/clients/:id", "page|/admin"]);
   });
 
   it("a screen is covered when any user's node of it is", () => {
@@ -112,7 +112,8 @@ describe("requirementFlows", () => {
     const m = buildModel(GRAPH);
     const [f] = requirementFlows(m, [{ key: "FORM POST /clients", text: "O formulário aceita dados válidos", node_ids: ["cl-a"] }, { key: "REQ-9", text: "x", node_ids: ["ghost"] }]);
     expect(f).toMatchObject({ id: "req:FORM POST /clients", origin: "requirement", title: "FORM POST /clients", start: ["page|/clients"] });
-    expect(f?.screens).toContain("endpoint|POST /clients");
+    expect(f?.screens).toContain("page|/clients/:id");
+    expect(f?.screens).not.toContain("endpoint|POST /clients");
     expect(requirementFlows(m, [{ key: "REQ-9", text: "x", node_ids: ["ghost"] }])).toEqual([]); // nothing of it on the map
   });
 
@@ -151,25 +152,32 @@ describe("runFlow", () => {
 describe("screenDifferences", () => {
   it("says what only one user has on a screen several users reach", () => {
     const clients = buildModel(GRAPH).screens.get("page|/clients");
-    expect(screenDifferences(clients as never)).toEqual({ admin: ["Excluir cliente"] });
+    expect(screenDifferences(clients as never)).toEqual({ admin: ["Excluir cliente", "formulário Novo cliente"], operador: ["formulário Buscar clientes"] });
   });
 
   it("says nothing for a screen one user reaches, or when they have the same", () => {
     const m = buildModel(GRAPH);
     expect(screenDifferences(m.screens.get("page|/admin") as never)).toEqual({});
-    const same = buildModel({ ...GRAPH, nodes: GRAPH.nodes.map((n) => (n.id === "cl-o" ? { ...n, metadata: controls("Novo cliente", "Excluir cliente") } : n)) });
+    const same = buildModel({
+      ...GRAPH,
+      nodes: GRAPH.nodes.map((n) =>
+        n.id === "cl-o"
+          ? { ...n, metadata: { ...controls("Novo cliente", "Excluir cliente"), ...forms({ label: "Novo cliente", method: "POST", action: "/clients" }) } }
+          : n,
+      ),
+    });
     expect(screenDifferences(same.screens.get("page|/clients") as never)).toEqual({});
   });
 
   it("counts forms as capabilities too", () => {
     const g = { ...GRAPH, nodes: GRAPH.nodes.map((n) => (n.id === "cl-a" ? { ...n, metadata: { ...controls("Novo cliente"), forms: [{ method: "POST", action: "/clients", label: "Importar planilha" }] } } : n)) };
-    expect(screenDifferences(buildModel(g).screens.get("page|/clients") as never)).toEqual({ admin: ["formulário Importar planilha"] });
+    expect(screenDifferences(buildModel(g).screens.get("page|/clients") as never)).toEqual({ admin: ["formulário Importar planilha"], operador: ["formulário Buscar clientes"] });
   });
 });
 
 describe("layoutFlow", () => {
   const m = buildModel(GRAPH);
-  const flow = detectJourneys(m)[0] as NonNullable<ReturnType<typeof detectJourneys>[number]>;
+  const flow = detectJourneys(m).find((f) => f.title === "/clients") as NonNullable<ReturnType<typeof detectJourneys>[number]>;
   const layout = layoutFlow(m, flow);
   const box = (key: string, user: string) => layout.boxes.find((b) => b.id === `${key}@${user}`);
 
@@ -185,23 +193,22 @@ describe("layoutFlow", () => {
   });
 
   it("shows a screen a user cannot reach as a ghost in their lane, so a missing permission is visible", () => {
-    const ghost = box("page|/clients/:id", "operador");
+    const ghost = box("page|/admin", "operador");
     expect(ghost).toMatchObject({ ghost: true, nodes: [] });
-    expect(box("page|/clients/:id", "admin")?.ghost).toBe(false);
-    // an API call has no "no access" to show
-    expect(layout.boxes.filter((b) => b.screen.kind === "endpoint").every((b) => !b.ghost)).toBe(true);
+    expect(box("page|/admin", "admin")?.ghost).toBe(false);
+    expect(layout.boxes.some((b) => b.screen.kind === "endpoint")).toBe(false);
   });
 
   it("marks what only one user has on a screen they share", () => {
-    expect(box("page|/clients", "admin")?.only).toEqual(["Excluir cliente"]);
-    expect(box("page|/clients", "operador")?.only).toEqual([]);
+    expect(box("page|/clients", "admin")?.only).toEqual(["Excluir cliente", "formulário Novo cliente"]);
+    expect(box("page|/clients", "operador")?.only).toEqual(["formulário Buscar clientes"]);
   });
 
   it("draws arrows inside each lane only, between the boxes the user really has", () => {
     const admin = layout.arrows.filter((a) => a.user === "admin");
     const operador = layout.arrows.filter((a) => a.user === "operador");
-    expect(admin.map((a) => a.label).sort()).toEqual(["Salvar", "abre “Novo cliente”", "envia “Novo cliente”"]);
-    expect(operador.map((a) => a.label).sort()).toEqual(["Salvar", "abre “Novo cliente”"]); // no "envia": they never reach /clients/:id
+    expect(admin.map((a) => a.label).sort()).toEqual(["abre “Novo cliente”", "envia “Novo cliente”", "vai para “Admin”", "vai para “Início”"]);
+    expect(operador.map((a) => a.label).sort()).toEqual(["abre “Novo cliente”"]); // no link to /admin, no submit to /clients/:id
     for (const a of layout.arrows) expect(a.from.endsWith(`@${a.user}`) && a.to.endsWith(`@${a.user}`)).toBe(true);
   });
 
@@ -213,9 +220,8 @@ describe("layoutFlow", () => {
   });
 
   it("keeps an API call compact, so a screen that calls many endpoints does not become a tall strip", () => {
-    const call = layout.boxes.find((b) => b.screen.kind === "endpoint");
     const page = layout.boxes.find((b) => b.screen.kind === "page");
-    expect(call?.h).toBe(ENDPOINT_H);
+    expect(layout.boxes.some((b) => b.screen.kind === "endpoint")).toBe(false);
     expect(page?.h).toBe(BOX_H);
     expect(ENDPOINT_H).toBeLessThan(BOX_H / 2);
   });
@@ -311,5 +317,25 @@ describe("boxFocus", () => {
     expect(boxFocus(layout, { c1: "pass", c3: "pass" })["page|/customers/:id@admin"]).toBe("c1"); // none failed: the one with a picture
     expect(boxFocus(layout, undefined)["page|/customers/:id@admin"]).toBe("c1");
     expect(boxFocus(layout, undefined)["page|/login@admin"]).toBe("l");
+  });
+});
+
+describe("boxPossibilities", () => {
+  it("builds possibilities from forms, controls and transitions and overlays test verdict", () => {
+    const model = buildModel(GRAPH);
+    const flow = detectJourneys(model).find((f) => f.title === "/clients") as NonNullable<ReturnType<typeof detectJourneys>[number]>;
+    const layout = layoutFlow(model, flow);
+    const admin = layout.boxes.find((b) => b.id === "page|/clients@admin") as NonNullable<(typeof layout.boxes)[number]>;
+    const operador = layout.boxes.find((b) => b.id === "page|/clients@operador") as NonNullable<(typeof layout.boxes)[number]>;
+    const adminPoss = boxPossibilities(admin, { "cl-a": "fail" });
+    const operadorPoss = boxPossibilities(operador, undefined);
+
+    expect(adminPoss.some((p) => p.kind === "submit" && p.label.includes("Novo cliente"))).toBe(true);
+    expect(adminPoss.some((p) => p.kind === "open" && p.label.includes("Novo cliente"))).toBe(true);
+    expect(adminPoss.some((p) => p.kind === "action" && p.label.includes("Excluir cliente"))).toBe(true);
+    expect(adminPoss.every((p) => p.result === "fail" && p.tested)).toBe(true);
+
+    expect(operadorPoss.some((p) => p.kind === "search" && p.label.includes("Buscar clientes"))).toBe(true);
+    expect(operadorPoss.every((p) => p.result === "untested" && !p.tested)).toBe(true);
   });
 });

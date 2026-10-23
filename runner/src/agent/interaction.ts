@@ -29,6 +29,8 @@ export interface FormInfo {
   submitLabel: string;
   hasFile: boolean;
   hasPassword: boolean;
+  /** Lives in the global chrome (header/nav/aside/fixed): the same form on every page, so it is explored once, not per page. */
+  chrome?: boolean;
 }
 
 export interface ButtonInfo {
@@ -36,6 +38,8 @@ export interface ButtonInfo {
   label: string;
   kind: "button" | "toggle" | "summary" | "tab";
   disabled: boolean;
+  /** Lives in the global chrome (header/nav/aside/fixed): the same button on every page, so it is acted on once, not per page. */
+  chrome?: boolean;
 }
 
 export interface Inventory {

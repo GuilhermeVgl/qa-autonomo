@@ -1,4 +1,4 @@
-import type { FieldInfo, Intent } from "./interaction.js";
+import type { FieldInfo, FormInfo, Intent } from "./interaction.js";
 
 // whole-word match (en/pt), so "Salvador" is not "salvar" and "Sairdo" is not "sair"
 const words = (list: string): RegExp => new RegExp(`(?:^|[^\\p{L}])(?:${list})(?![\\p{L}])`, "iu");
@@ -36,6 +36,27 @@ export function classifyIntent(label: string, hint: { href?: string } = {}): Int
 
 /** Deleting data and triggering things outside the app (WhatsApp, e-mail, payments) wait for `destructive_policy=allow`. */
 export const needsAllow = (intent: Intent): boolean => intent === "delete" || intent === "external";
+
+const OWN_ACCOUNT_PATH =
+  /(?:^|\/)(?:profile|perfil|account|conta|my-account|my_account|me|password|senha|settings(?:\/(?:profile|account|security|senha|password))?|users\/(?:edit|settings))(?:$|[/?#])/i;
+const OWN_ACCOUNT_LABEL =
+  /(?:minha\s+conta|meu\s+perfil|minhas?\s+configura(?:c|ç)(?:o|õ)es|my\s+(?:account|profile)|account\s+settings|profile\s+settings|security\s+settings|(?:change|update|reset)\s+password|(?:alterar|trocar|atualizar)\s+senha|password\s+(?:settings|update))/i;
+const OWN_ACCOUNT_STRONG_FIELD =
+  /(?:current[_-]?password|new[_-]?password|password[_-]?confirmation|confirm(?:ar|a)(?:[_\s-]?)senha|senha(?:[_\s-]?atual|[_\s-]?nova)|two[_-]?factor|totp|mfa)/i;
+const OWN_ACCOUNT_CREDENTIAL_FIELD = /(?:email|e-?mail|username|login|senha|password|nome)/i;
+
+/**
+ * Forms that likely change the authenticated person's own account (profile, e-mail, password, 2FA) are never submitted.
+ * This protects the test identity across runs.
+ */
+export function isOwnAccountForm(form: Pick<FormInfo, "action" | "label" | "submitLabel" | "fields">): boolean {
+  const surface = `${form.action} ${form.label} ${form.submitLabel}`.toLowerCase();
+  if (OWN_ACCOUNT_LABEL.test(surface)) return true;
+  const strong = form.fields.some((f) => OWN_ACCOUNT_STRONG_FIELD.test(`${f.name} ${f.label} ${f.type}`.toLowerCase()));
+  if (strong) return true;
+  const cred = form.fields.some((f) => OWN_ACCOUNT_CREDENTIAL_FIELD.test(`${f.name} ${f.label} ${f.type}`.toLowerCase()));
+  return cred && OWN_ACCOUNT_PATH.test(form.action);
+}
 
 const pad = (n: number, size: number): string => String(n).padStart(size, "0");
 

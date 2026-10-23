@@ -19,6 +19,16 @@ const base: BriefResponse = {
       percent_screens: 50,
       screens_without_requirement: ["/admin", "/help"],
     },
+    capabilities: {
+      total: 3,
+      covered: 2,
+      tested: 2,
+      failing: 1,
+      list: [
+        { key: "orders", name: "Orders", screens: 2, screens_covered: 1, screens_tested: 2, status: "fail" },
+        { key: "admin", name: "Admin", screens: 1, screens_covered: 0, screens_tested: 1, status: "pass" },
+      ],
+    },
     regression: {
       finished_at: "2026-10-05T13:00:00Z",
       passed: 8,
@@ -63,7 +73,7 @@ describe("renderHtml", () => {
   });
 
   it("states the facts with the numbers, the users and the failing requirements", () => {
-    for (const want of ["hml", "75%", "REQ-002", "/admin", "operador", "REQ-001", "/orders: HTTP 500", "8", "Modelo de IA configurado"]) {
+    for (const want of ["hml", "75%", "REQ-002", "/admin", "operador", "REQ-001", "/orders: HTTP 500", "8", "Modelo de IA configurado", "capacidades testadas", "Capacidades de produto", "Orders"]) {
       expect(html, want).toContain(want);
     }
   });

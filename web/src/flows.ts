@@ -13,6 +13,23 @@ export interface Screen {
   requirements: string[];
 }
 
+export type PossibilityKind = "navigate" | "submit" | "search" | "open" | "action";
+
+/** What this user can do from a screen, from observed transitions and page inventory metadata. */
+export interface Possibility {
+  id: string;
+  kind: PossibilityKind;
+  label: string;
+  target?: string;
+  method?: string;
+  action?: string;
+}
+
+export interface PossibilityView extends Possibility {
+  tested: boolean;
+  result: NodeResult | "untested";
+}
+
 export type TransitionKind = "link" | "open" | "click" | "submit" | "search" | "request";
 
 /** Something the agent did to get from one screen to another, at the level of screens (not of one user's nodes). */
@@ -56,7 +73,6 @@ export interface Flow {
 }
 
 export const NO_USER = "";
-const INTERACTIVE: TransitionKind[] = ["open", "click", "submit", "search", "request"];
 
 const screenKey = (n: GraphNode): string => `${n.kind}|${n.label}`;
 const usersOf = (n: GraphNode): string[] => (n.app_roles.length > 0 ? n.app_roles : [NO_USER]);
@@ -115,6 +131,97 @@ export function buildModel(graph: GraphData): Model {
   return { screens, transitions, out, screenOf };
 }
 
+function metadataForms(nodes: GraphNode[]): Array<{ label: string; method: string; action: string; purpose: string }> {
+  const out: Array<{ label: string; method: string; action: string; purpose: string }> = [];
+  for (const n of nodes) {
+    const forms = (n.metadata["forms"] ?? []) as Array<{ label?: unknown; method?: unknown; action?: unknown; purpose?: unknown }>;
+    for (const f of forms) {
+      out.push({
+        label: str(f.label).trim(),
+        method: str(f.method).trim().toUpperCase() || "GET",
+        action: str(f.action).trim(),
+        purpose: str(f.purpose).trim(),
+      });
+    }
+  }
+  return out;
+}
+
+function metadataControls(nodes: GraphNode[]): Array<{ label: string; intent: string }> {
+  const out: Array<{ label: string; intent: string }> = [];
+  for (const n of nodes) {
+    const controls = (n.metadata["controls"] ?? []) as Array<{ label?: unknown; intent?: unknown }>;
+    for (const c of controls) out.push({ label: str(c.label).trim(), intent: str(c.intent).trim() });
+  }
+  return out;
+}
+
+function metadataFollowed(nodes: GraphNode[]): Array<{ label: string; type: string }> {
+  const out: Array<{ label: string; type: string }> = [];
+  for (const n of nodes) {
+    const followed = (n.metadata["followed"] ?? []) as Array<{ label?: unknown; type?: unknown }>;
+    for (const f of followed) out.push({ label: str(f.label).trim(), type: str(f.type).trim() });
+  }
+  return out;
+}
+
+function addPossibility(into: Map<string, Possibility>, p: Omit<Possibility, "id">): void {
+  const key = `${p.kind}|${p.label}|${p.target ?? ""}|${p.method ?? ""}|${p.action ?? ""}`;
+  if (into.has(key)) return;
+  into.set(key, { id: key, ...p });
+}
+
+function kindFromIntent(intent: string): PossibilityKind {
+  return intent === "open" ? "open" : "action";
+}
+
+function possibilityKindOfTransition(kind: TransitionKind): PossibilityKind | undefined {
+  switch (kind) {
+    case "link":
+      return "navigate";
+    case "submit":
+      return "submit";
+    case "search":
+      return "search";
+    case "open":
+      return "open";
+    case "click":
+      return "action";
+    default:
+      return undefined;
+  }
+}
+
+function buildPossibilities(screenKey: string, user: string, nodes: GraphNode[], transitions: Transition[]): Possibility[] {
+  const map = new Map<string, Possibility>();
+
+  for (const t of transitions) {
+    if (t.from !== screenKey) continue;
+    if (!t.users.includes(user) && !(t.users.includes(NO_USER) && user === NO_USER)) continue;
+    const kind = possibilityKindOfTransition(t.kind);
+    if (!kind) continue;
+    addPossibility(map, { kind, label: t.label, target: t.to });
+  }
+
+  for (const f of metadataForms(nodes)) {
+    const label = (f.purpose || f.label || `${f.method} ${f.action}`).trim();
+    addPossibility(map, { kind: f.method === "GET" ? "search" : "submit", label, method: f.method, action: f.action || undefined });
+  }
+
+  for (const c of metadataControls(nodes)) {
+    if (!c.label) continue;
+    addPossibility(map, { kind: kindFromIntent(c.intent), label: c.label });
+  }
+
+  for (const f of metadataFollowed(nodes)) {
+    if (!f.label) continue;
+    const kind: PossibilityKind = f.type === "search" ? "search" : f.type === "submit" ? "submit" : "action";
+    addPossibility(map, { kind, label: f.label });
+  }
+
+  return [...map.values()].sort((a, b) => a.label.localeCompare(b.label));
+}
+
 function usersAcross(model: Model, keys: string[]): { users: string[]; partial: number } {
   const users = new Set<string>();
   for (const k of keys) for (const u of Object.keys(model.screens.get(k)?.cells ?? {})) users.add(u);
@@ -132,7 +239,7 @@ function makeFlow(model: Model, origin: FlowOrigin, id: string, title: string, s
   return { id, origin, title, subtitle, start, screens, transitions, users, partial, uncovered, ...(results ? { results } : {}) };
 }
 
-/** What can be reached from a screen by doing things (opening, sending, searching, calling), a few steps deep. */
+/** What can be reached from a screen by doing things (including navigation), a few steps deep. */
 function expand(model: Model, starts: string[], maxDepth: number): { screens: string[]; transitions: Transition[] } {
   const seen = new Map<string, number>(starts.map((s) => [s, 0]));
   const order = [...starts];
@@ -143,13 +250,13 @@ function expand(model: Model, starts: string[], maxDepth: number): { screens: st
     const depth = seen.get(from) ?? 0;
     if (depth >= maxDepth) continue;
     for (const t of model.out.get(from) ?? []) {
-      if (!INTERACTIVE.includes(t.kind)) continue;
+      if (t.kind === "request") continue;
       used.set(t.id, t);
       if (!seen.has(t.to)) {
         seen.set(t.to, depth + 1);
         order.push(t.to);
-        // a page reached by sending a form or searching ends the story there; a window or a call can lead further
-        if (model.screens.get(t.to)?.kind !== "page" || t.kind === "click") queue.push(t.to);
+        // a page reached by sending a form or searching usually ends there; open/click/link keep exploring
+        if (model.screens.get(t.to)?.kind !== "page" || t.kind === "click" || t.kind === "link") queue.push(t.to);
       }
     }
   }
@@ -159,14 +266,13 @@ function expand(model: Model, starts: string[], maxDepth: number): { screens: st
 const MAX_JOURNEYS = 200;
 
 /**
- * The stories the map already tells: a screen where the agent could open a window, send a form, search or call an
- * endpoint, with where each of those led. Plain navigation links are left out: they connect everything to everything.
+ * The stories the map already tells: from each screen with outgoing possibilities, where those possibilities can lead.
  */
 export function detectJourneys(model: Model, maxDepth = 4): Flow[] {
   const flows: Flow[] = [];
   for (const screen of model.screens.values()) {
     if (screen.kind !== "page") continue;
-    const first = (model.out.get(screen.key) ?? []).filter((t) => INTERACTIVE.includes(t.kind));
+    const first = (model.out.get(screen.key) ?? []).filter((t) => t.kind !== "request");
     if (first.length === 0) continue;
     const { screens, transitions } = expand(model, [screen.key], maxDepth);
     const actions = [...new Set(first.map((t) => t.label))].slice(0, 3).join(" · ");
@@ -263,6 +369,8 @@ export interface Box {
   h: number;
   /** Only for real boxes: what this user has on the screen that the others do not. */
   only: string[];
+  /** What this user can do from this screen. */
+  possibilities?: Possibility[];
 }
 
 /**
@@ -372,7 +480,7 @@ export function layoutFlow(model: Model, flow: Flow): Layout {
       const screen = model.screens.get(key);
       if (!screen) continue;
       const nodes = screen.cells[lane.user] ?? [];
-      if (nodes.length === 0 && screen.kind === "endpoint") continue; // an API call has no "no access" to show
+      if (screen.kind === "endpoint") continue; // endpoint calls are shown in details, not as cards
       const diff = screenDifferences(screen)[lane.user] ?? [];
       boxes.push({
         id: idOf(key, lane.user),
@@ -384,6 +492,7 @@ export function layoutFlow(model: Model, flow: Flow): Layout {
         y: lane.top + LANE_HEAD + (y.get(key) ?? 0),
         h: heightOf(screen),
         only: diff,
+        possibilities: nodes.length > 0 ? buildPossibilities(key, lane.user, nodes, flow.transitions) : [],
       });
     }
   }
@@ -428,4 +537,12 @@ export function boxFocus(layout: Layout, results: Record<string, NodeResult> | u
     out[b.id] = (failing ?? b.nodes.find((n) => n.has_thumbnail) ?? b.nodes[0])?.id ?? "";
   }
   return out;
+}
+
+/** The possibilities of a box with the current test verdict overlay. */
+export function boxPossibilities(box: Box, results: Record<string, NodeResult> | undefined): PossibilityView[] {
+  const verdict = worstResult(box.nodes, results);
+  const tested = verdict !== undefined;
+  const result: NodeResult | "untested" = verdict ?? "untested";
+  return (box.possibilities ?? []).map((p) => ({ ...p, tested, result }));
 }
