@@ -13,13 +13,17 @@ import { BrowserDriver } from "../src/executors/browser/driver.js";
 let server: Server;
 let plain: Server;
 let strict: Server;
+let noisy: Server;
 let base: string;
 let plainBase: string;
 let strictBase: string;
+let noisyBase: string;
+let otpSecret: string;
 
 beforeAll(async () => {
   const file = fileURLToPath(new URL("../../fixtures/sample-app/server.mjs", import.meta.url));
-  const app = (await import(pathToFileURL(file).href)) as { createApp(): Server };
+  const app = (await import(pathToFileURL(file).href)) as { createApp(): Server; OTP_SECRET: string };
+  otpSecret = app.OTP_SECRET;
   server = app.createApp();
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -34,11 +38,23 @@ beforeAll(async () => {
   });
   await new Promise<void>((r) => strict.listen(0, "127.0.0.1", r));
   strictBase = `http://127.0.0.1:${(strict.address() as AddressInfo).port}`;
+  // login page that also loads blocked third-party assets (fonts/tag manager)
+  noisy = createServer((req, res) => {
+    if (req.method === "POST") return res.writeHead(200, { "content-type": "text/html" }).end('<form method="post" action="/in"><input name="user"><input type="password" name="pw"><p>Usuário ou senha inválidos.</p><button type="submit">Entrar</button></form>');
+    res
+      .writeHead(200, { "content-type": "text/html" })
+      .end(
+        '<!doctype html><html><head><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto"><script src="https://www.googletagmanager.com/gtag/js?id=G-TEST"></script></head><body><form method="post" action="/in"><input name="user"><input type="password" name="pw"><button type="submit">Entrar</button></form></body></html>',
+      );
+  });
+  await new Promise<void>((r) => noisy.listen(0, "127.0.0.1", r));
+  noisyBase = `http://127.0.0.1:${(noisy.address() as AddressInfo).port}`;
 });
 afterAll(() => {
   server.close();
   plain.close();
   strict.close();
+  noisy.close();
 });
 
 async function tryLogin(baseUrl: string, password = "segredo", hosts = ["127.0.0.1"], username = "ana") {
@@ -46,6 +62,18 @@ async function tryLogin(baseUrl: string, password = "segredo", hosts = ["127.0.0
   try {
     const session = await driver.newSession("ana", { app_role: "ana", kind: "login", payload: { username, password } });
     const failure: LoginFailure | undefined = driver.loginFailure("ana");
+    return { session, failure, driver };
+  } catch (err) {
+    await driver.close();
+    throw err;
+  }
+}
+
+async function newSession(baseUrl: string, credential: Job["credentials"][number], hosts = ["127.0.0.1"]) {
+  const driver = await BrowserDriver.launch({ base_url: baseUrl, allowed_hosts: hosts });
+  try {
+    const session = await driver.newSession(credential.app_role, credential);
+    const failure: LoginFailure | undefined = driver.loginFailure(credential.app_role);
     return { session, failure, driver };
   } catch (err) {
     await driver.close();
@@ -105,12 +133,54 @@ describe("logging in the way real applications ask for it", () => {
     expect(failure?.message).toContain("HTTP 401");
   }, 60_000);
 
+  it("does not call it SSO when only third-party assets are blocked (fonts/tag manager)", async () => {
+    const { session, failure, driver } = await tryLogin(noisyBase + "/", "errada");
+    await driver.close();
+    expect(session).toBeNull();
+    expect(failure?.reason).toBe("rejected");
+    expect(failure?.message).not.toContain("hosts permitidos");
+  }, 60_000);
+
   it("says a one-time code is in the way, instead of reporting a login that did not happen as a success", async () => {
     const { session, failure, driver } = await tryLogin(base + "/otp");
     await driver.close();
     expect(session).toBeNull();
     expect(failure?.reason).toBe("needs_more");
     expect(failure?.message).toContain("2FA");
+  }, 60_000);
+
+  it("passes the one-time code (2FA) from a TOTP secret and gets in", async () => {
+    const { session, failure, driver } = await newSession(base + "/otp", { app_role: "ana", kind: "login", payload: { username: "ana", password: "segredo", totp_secret: otpSecret } });
+    try {
+      expect(failure).toBeUndefined();
+      expect(session).not.toBeNull();
+      expect((await session?.visit(base + "/otp"))?.links.some((l) => l.href.includes("/otp/app"))).toBe(true);
+    } finally {
+      await session?.close();
+      await driver.close();
+    }
+  }, 60_000);
+
+  it("reuses a saved session (kind=session) and never performs the login", async () => {
+    const state = JSON.stringify({ cookies: [{ name: "lp_session", value: "ok", domain: "127.0.0.1", path: "/", expires: -1, httpOnly: true, secure: false, sameSite: "Lax" }], origins: [] });
+    const { session, failure, driver } = await newSession(base + "/lp", { app_role: "ana", kind: "session", payload: { state } });
+    try {
+      expect(failure).toBeUndefined();
+      expect(session).not.toBeNull();
+      expect((await session?.visit(base + "/lp"))?.links.some((l) => l.href.endsWith("/lp/app/pedidos"))).toBe(true);
+    } finally {
+      await session?.close();
+      await driver.close();
+    }
+  }, 60_000);
+
+  it("reports an expired session when the saved cookie no longer authenticates", async () => {
+    const state = JSON.stringify({ cookies: [], origins: [] });
+    const { session, failure, driver } = await newSession(base + "/lp", { app_role: "ana", kind: "session", payload: { state } });
+    await driver.close();
+    expect(session).toBeNull();
+    expect(failure?.reason).toBe("session_expired");
+    expect(failure?.message).toContain("recapture");
   }, 60_000);
 
   it("says a captcha is in the way", async () => {

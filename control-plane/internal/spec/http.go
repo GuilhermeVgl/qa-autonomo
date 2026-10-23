@@ -168,7 +168,8 @@ func Register(mux *http.ServeMux, mw func(http.Handler) http.Handler, pool *pgxp
 			httpx.Error(w, http.StatusNotFound, "not found")
 			return
 		}
-		if _, err := q.GetSpec(r.Context(), GetSpecParams{OrganizationID: p.OrganizationID, ID: sid}); err != nil {
+		s, err := q.GetSpec(r.Context(), GetSpecParams{OrganizationID: p.OrganizationID, ID: sid})
+		if err != nil {
 			notFoundOr500(w, err)
 			return
 		}
@@ -177,7 +178,7 @@ func Register(mux *http.ServeMux, mw func(http.Handler) http.Handler, pool *pgxp
 			httpx.Error(w, http.StatusInternalServerError, "internal error")
 			return
 		}
-		httpx.WriteJSON(w, http.StatusOK, reqViews(rows))
+		httpx.WriteJSON(w, http.StatusOK, reqViews(rows, s.SourceType))
 	})))
 
 	registerManage(mux, mw, pool)

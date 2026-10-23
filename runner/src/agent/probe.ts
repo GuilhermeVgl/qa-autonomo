@@ -1,4 +1,4 @@
-import { classifyIntent, fakeValue, needsAllow } from "./controls.js";
+import { classifyIntent, fakeValue, isOwnAccountForm, needsAllow } from "./controls.js";
 import type { DestructivePolicy } from "./guards.js";
 import type { ActionResult, ActionSpec, ButtonInfo, FormInfo, Intent, Inventory, Outcome, Understanding } from "./interaction.js";
 
@@ -20,14 +20,16 @@ export interface ProbeInput {
   understanding?: Understanding | null | undefined;
   /** A number that makes the test data of each submission unique. */
   seed: () => number;
+  /** Signatures of global-chrome actions (header/sidebar/fixed) already performed; such an action is tried once, not per page. */
+  chromeSeen?: Set<string> | undefined;
   shouldStop: () => boolean;
   deadline: number;
 }
 
 export interface ProbeResult {
   outcomes: Outcome[];
-  /** Controls left alone: logout/account removal, forms with passwords, risky buttons in an environment that does not allow them. */
-  skipped: { never: number; sensitive: number; risky: number };
+  /** Controls left alone: logout/account removal, forms with passwords, risky buttons in an environment that does not allow them, and global-chrome actions already tried elsewhere. */
+  skipped: { never: number; sensitive: number; risky: number; chrome: number };
   /** Browser actions used (opening a modal again counts). */
   used: number;
 }
@@ -39,6 +41,8 @@ interface Planned {
   /** Lower goes first: buttons, then searches, then ordinary forms, then risky ones. */
   order: number;
   via?: string;
+  /** Set when the control is part of the reusable chrome: its signature is recorded so it is not tried again on other pages. */
+  chromeSig?: string;
   form?: { action: string; method: string };
   build: (inv: Inventory) => ActionSpec | null;
 }
@@ -53,7 +57,7 @@ const ORDER = { button: 0, search: 1, form: 2, risky: 3 } as const;
  * aborts every write request before it leaves the machine, which is how the endpoint behind them is learned.
  */
 export async function probePage(input: ProbeInput): Promise<ProbeResult> {
-  const skipped = { never: 0, sensitive: 0, risky: 0 };
+  const skipped = { never: 0, sensitive: 0, risky: 0, chrome: 0 };
   const outcomes: Outcome[] = [];
   const queue: Planned[] = plan(input.inventory, input, skipped);
   let used = 0;
@@ -86,6 +90,7 @@ export async function probePage(input: ProbeInput): Promise<ProbeResult> {
     used++;
     const result = await safePerform(input.session, action);
     outcomes.push({ action, kind: next.kind, intent: next.intent, label: next.label, via: next.via, form: next.form, result });
+    if (next.chromeSig) input.chromeSeen?.add(next.chromeSig); // a global-chrome action: done once, skipped on later pages
 
     // a modal opened by a plain click: its forms and buttons are worth a visit of their own (one level deep)
     if (!next.via && next.kind === "click" && result.modal) {
@@ -120,6 +125,12 @@ function plan(inv: Inventory, input: ProbeInput, skipped: ProbeResult["skipped"]
       skipped.risky++; // a script behind a button is not covered by the write guard of forms, so it is not tried
       continue;
     }
+    // a button in the reusable chrome (header/sidebar) is the same on every page: act on it once, not from each screen
+    const chromeSig = b.chrome ? `b|${intent}|${b.label.toLowerCase()}` : undefined;
+    if (chromeSig && input.chromeSeen?.has(chromeSig)) {
+      skipped.chrome++;
+      continue;
+    }
     const nth = seenButtons.get(b.label) ?? 0;
     seenButtons.set(b.label, nth + 1);
     out.push({
@@ -128,6 +139,7 @@ function plan(inv: Inventory, input: ProbeInput, skipped: ProbeResult["skipped"]
       intent,
       order: needsAllow(intent) ? ORDER.risky : ORDER.button,
       ...(via ? { via } : {}),
+      ...(chromeSig ? { chromeSig } : {}),
       build: (cur) => {
         const found = locateButton(cur, b.label, nth, b.kind);
         return found ? { type: "click", ref: found.ref, label: b.label, accept: needsAllow(intent) } : null;
@@ -141,6 +153,10 @@ function plan(inv: Inventory, input: ProbeInput, skipped: ProbeResult["skipped"]
     const nth = seenForms.get(key) ?? 0;
     seenForms.set(key, nth + 1);
     const label = f.submitLabel || f.label || "Enviar";
+    if (isOwnAccountForm(f)) {
+      skipped.sensitive++; // never mutate the account used by the run; it must still log in next time
+      continue;
+    }
     if (f.hasPassword) {
       skipped.sensitive++;
       continue;
@@ -150,7 +166,12 @@ function plan(inv: Inventory, input: ProbeInput, skipped: ProbeResult["skipped"]
       skipped.never++;
       continue;
     }
-    const meta = { form: { action: f.action, method: f.method }, ...(via ? { via } : {}) };
+    const chromeSig = f.chrome ? `f|${f.method} ${f.action}` : undefined;
+    if (chromeSig && input.chromeSeen?.has(chromeSig)) {
+      skipped.chrome++;
+      continue;
+    }
+    const meta = { form: { action: f.action, method: f.method }, ...(via ? { via } : {}), ...(chromeSig ? { chromeSig } : {}) };
     const valuesFor = (): Record<string, string | boolean> => {
       const values: Record<string, string | boolean> = {};
       const n = input.seed();

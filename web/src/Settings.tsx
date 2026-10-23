@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent, type ReactNode } from "react";
 import { api, errorMessage, type Credential, type Environment, type Project } from "./api";
+import { CaptureDialog } from "./CaptureDialog";
 import { cronLabel, timeAgo } from "./format";
 import { Icon, type IconName } from "./icons";
 import { useAppTheme, type ThemePref } from "./theme";
@@ -321,6 +322,7 @@ function Environments({ token, projectId, envId, onChanged, onSelect }: { token:
 
 function Credentials({ token, envId }: { token: string; envId: string | undefined }) {
   const qc = useQueryClient();
+  const toast = useToast();
   const creds = useQuery({
     queryKey: ["credentials", envId],
     queryFn: () => api<Credential[]>(`/api/v1/environments/${envId}/credentials`, token),
@@ -330,6 +332,7 @@ function Credentials({ token, envId }: { token: string; envId: string | undefine
   const [user, setUser] = useState("");
   const [password, setPassword] = useState("");
   const [saved, setSaved] = useState(false);
+  const [capturing, setCapturing] = useState<string | null>(null);
   const { error, run } = useAction(() => void qc.invalidateQueries({ queryKey: ["credentials"] }));
 
   async function submit(e: FormEvent) {
@@ -338,7 +341,7 @@ function Credentials({ token, envId }: { token: string; envId: string | undefine
     const ok = await run(() =>
       api(`/api/v1/environments/${envId}/credentials`, token, {
         method: "PUT",
-        body: JSON.stringify({ app_role: role.trim(), kind: "login", payload: { username: user, password } }),
+        body: JSON.stringify({ app_role: role.trim(), kind: "login", payload: { username: user, ...(password ? { password } : {}) } }),
       }).then(() => undefined),
     );
     if (ok) {
@@ -359,8 +362,31 @@ function Credentials({ token, envId }: { token: string; envId: string | undefine
                 <span className="row-icon">
                   <Icon name="key" size={16} />
                 </span>
-                <strong>{c.app_role}</strong>
-                <span className="pill">{c.kind === "login" ? "usuário e senha" : c.kind}</span>
+                <span className="row-main">
+                  <strong>{c.app_role}</strong>
+                  <span className="meta">{c.kind === "login" ? "usuário e senha" : c.kind === "session" ? "sessão capturada" : c.kind === "api_token" ? "token de API" : c.kind}</span>
+                </span>
+                <button
+                  type="button"
+                  className="btn sm"
+                  aria-label={`Editar ${c.app_role}`}
+                  onClick={() => {
+                    setRole(c.app_role);
+                    setUser("");
+                    setPassword("");
+                    setSaved(false);
+                  }}
+                >
+                  Editar
+                </button>
+                <button
+                  type="button"
+                  className="btn sm danger"
+                  aria-label={`Excluir ${c.app_role}`}
+                  onClick={() => void run(() => api(`/api/v1/credentials/${c.id}`, token, { method: "DELETE" }).then(() => toast.show({ kind: "info", title: "Credencial excluída" })))}
+                >
+                  Excluir
+                </button>
               </li>
             ))}
           </ul>
@@ -376,16 +402,34 @@ function Credentials({ token, envId }: { token: string; envId: string | undefine
           <Field label="Login (usuário ou e-mail)">
             <input value={user} onChange={(e) => setUser(e.target.value)} required autoComplete="off" />
           </Field>
-          <Field label="Senha">
-            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required autoComplete="new-password" />
+          <Field label="Senha" hint="Deixe em branco para SSO ou magic-link (só o usuário). Para SSO completo (B2C/MFA), use “Capturar sessão”.">
+            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" />
           </Field>
-          <button type="submit" className="btn primary" disabled={!envId}>
-            Salvar credencial
-          </button>
+          <div className="btn-row">
+            <button type="submit" className="btn primary" disabled={!envId}>
+              Salvar credencial
+            </button>
+            <button type="button" className="btn" disabled={!envId || !role.trim()} onClick={() => setCapturing(role.trim())} title="Abre um navegador remoto para você logar uma vez (SSO, 2FA, captcha) e reusar a sessão">
+              Capturar sessão (SSO/2FA)
+            </button>
+          </div>
           {saved && <p role="status">Credencial salva (cifrada; não é exibida novamente).</p>}
           {error && <p role="alert">{error}</p>}
         </form>
       </Panel>
+      {capturing && envId && (
+        <CaptureDialog
+          token={token}
+          envId={envId}
+          appRole={capturing}
+          onClose={() => setCapturing(null)}
+          onDone={() => {
+            setCapturing(null);
+            toast.show({ kind: "success", title: "Sessão capturada", text: `O agente agora entra como "${capturing}" reusando a sessão.` });
+            void qc.invalidateQueries({ queryKey: ["credentials"] });
+          }}
+        />
+      )}
     </>
   );
 }
@@ -396,6 +440,7 @@ function Tokens({ token, projectId }: { token: string; projectId: string | undef
   const qc = useQueryClient();
   const toast = useToast();
   const [name, setName] = useState("");
+  const [canCapture, setCanCapture] = useState(false);
   const [secret, setSecret] = useState<string | null>(null);
   const tokens = useQuery({
     queryKey: ["tokens", projectId],
@@ -407,7 +452,8 @@ function Tokens({ token, projectId }: { token: string; projectId: string | undef
   async function create(e: FormEvent) {
     e.preventDefault();
     const ok = await run(async () => {
-      const r = await api<{ token: string }>(`/api/v1/projects/${projectId}/tokens`, token, { method: "POST", body: JSON.stringify({ name: name.trim() }) });
+      const scopes = canCapture ? ["run:create", "run:read", "credential:write"] : undefined;
+      const r = await api<{ token: string }>(`/api/v1/projects/${projectId}/tokens`, token, { method: "POST", body: JSON.stringify({ name: name.trim(), ...(scopes ? { scopes } : {}) }) });
       setSecret(r.token);
     });
     if (ok) setName("");
@@ -463,6 +509,10 @@ function Tokens({ token, projectId }: { token: string; projectId: string | undef
           <Field label="Nome do token" hint="Ex.: github-actions, jenkins-hml.">
             <input value={name} onChange={(e) => setName(e.target.value)} required />
           </Field>
+          <label className="check">
+            <input type="checkbox" checked={canCapture} onChange={(e) => setCanCapture(e.target.checked)} />
+            Permitir salvar sessões capturadas (<code>npm run capture</code>)
+          </label>
           <button type="submit" className="btn primary" disabled={!projectId}>
             Criar token
           </button>

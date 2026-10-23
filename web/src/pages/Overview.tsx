@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { api, type Run } from "../api";
+import { api, type CapabilityResponse, type Run } from "../api";
 import type { BriefResponse } from "../briefReport";
 import { blockedOf } from "../blocked";
 import { Icon } from "../icons";
@@ -85,12 +85,23 @@ function AttentionCard() {
 
 export function Overview() {
   const ws = useWorkspace();
+  const capabilityView = useQuery({
+    queryKey: ["capabilities-overview-kpi", ws.env?.id, ws.graph.data?.graph.id],
+    queryFn: () => api<CapabilityResponse>(`/api/v1/environments/${ws.env?.id}/capabilities`, ws.token),
+    enabled: !!ws.env,
+    staleTime: 20_000,
+  });
   const { coverage, openFunctional: openBugs, openSecurity, openPendencies, runs, report, graph } = ws;
   const name = (ws.me.data?.email ?? "").split("@")[0];
   const lastRun = runs.data?.[0];
   const covered = coverage?.requirements.filter((r) => r.status === "covered").length ?? 0;
   const total = coverage?.requirements.length ?? 0;
   const noSpec = coverage?.nodes.filter((n) => n.status === "no_spec").length ?? 0;
+  const caps = capabilityView.data?.capabilities;
+  const capsTotal = caps?.length ?? 0;
+  const capsCovered = caps?.filter((c) => c.nodes_covered > 0).length ?? 0;
+  const capsTested = caps?.filter((c) => c.nodes_tested > 0).length ?? 0;
+  const capsFailing = caps?.filter((c) => c.status === "fail" || c.status === "error").length ?? 0;
   const sev = (s: string) => openBugs.filter((b) => b.severity === s).length;
 
   const steps: { title: string; text: string; done: boolean; optional?: boolean; label: string; run: () => void; disabled?: boolean }[] = [
@@ -188,6 +199,29 @@ export function Overview() {
           ) : (
             <p className="meta">Envie uma especificação e mapeie a aplicação para ver a cobertura.</p>
           )}
+        </section>
+
+        <section className="card kpi" aria-label="Capacidades">
+          <h3>Capacidades</h3>
+          {!ws.env || capabilityView.isPending ? (
+            <Skeleton height={22} radius={10} />
+          ) : capsTotal > 0 ? (
+            <>
+              <p className="kpi-main big">
+                {capsTested} / {capsTotal}
+              </p>
+              <p className="meta">capacidades testadas</p>
+              <div className="kpi-tags">
+                <span className="pill">{capsCovered} cobertas</span>
+                <span className="pill sev-critical">{capsFailing} com falha</span>
+              </div>
+            </>
+          ) : (
+            <p className="meta">Recalcule as capacidades para ver a visão de produto.</p>
+          )}
+          <button type="button" className="link-btn" onClick={() => ws.go("product")}>
+            Ver produto →
+          </button>
         </section>
 
         <section className="card kpi" aria-label="Bugs abertos">

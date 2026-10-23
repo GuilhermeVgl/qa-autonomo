@@ -1,4 +1,4 @@
-import { classifyIntent, fakeValue, needsAllow } from "./controls.js";
+import { classifyIntent, fakeValue, isOwnAccountForm, needsAllow } from "./controls.js";
 import type { Session } from "./explorer.js";
 import type { DestructivePolicy } from "./guards.js";
 import type { ActionResult, ObservedRequest } from "./interaction.js";
@@ -64,6 +64,9 @@ export async function checkForm(session: Session, pageUrl: string, ref: FormRef,
     const inv = await session.inventory();
     const form = inv.forms.find((f) => f.method === ref.method && f.action === ref.action);
     if (!form) return verdict(ref, pageUrl, policy, "fail", `o formulário ${ref.method} ${ref.action} não está mais na tela`);
+    if (isOwnAccountForm(form)) {
+      return verdict(ref, pageUrl, policy, "skipped", `"${form.submitLabel || form.label || ref.key}" parece alterar o próprio usuário logado; esse tipo de alteração nunca é executado`);
+    }
 
     const label = form.submitLabel || form.label;
     const intent = classifyIntent(label);
@@ -101,6 +104,9 @@ async function checkValidation(session: Session, pageUrl: string, ref: FormRef, 
     const form = inv.forms.find((f) => f.method === ref.method && f.action === ref.action);
     const gone = verdict(ref, pageUrl, policy, "fail", `o formulário ${ref.method} ${ref.action} não está mais na tela`, { mode: "validate" });
     if (!form) return gone;
+    if (isOwnAccountForm(form)) {
+      return verdict(ref, pageUrl, policy, "skipped", `"${form.submitLabel || form.label || ref.key}" parece alterar o próprio usuário logado; esse tipo de validação nunca é executado`, { mode: "validate" });
+    }
     const label = form.submitLabel || form.label;
     if (classifyIntent(label) === "never") return verdict(ref, pageUrl, policy, "skipped", `"${label}" encerra a sessão ou a conta e nunca é acionado`, { mode: "validate" });
 

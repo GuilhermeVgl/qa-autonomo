@@ -26,6 +26,8 @@ export interface InteractiveState {
   seed: number;
   emittedNodes: Set<string>;
   emittedEdges: Set<string>;
+  /** Signatures of global-chrome actions (header/sidebar) already tried this user, so they are not re-tried on every page. */
+  chromeSeen: Set<string>;
   totals: {
     pages_examined: number;
     actions: number;
@@ -36,6 +38,7 @@ export interface InteractiveState {
     skipped_never: number;
     skipped_sensitive: number;
     skipped_risky: number;
+    skipped_chrome: number;
   };
 }
 
@@ -48,7 +51,8 @@ export function newInteractiveState(maxActions: number, analyst?: Analyst, seed 
     seed,
     emittedNodes: new Set(),
     emittedEdges: new Set(),
-    totals: { pages_examined: 0, actions: 0, forms_submitted: 0, endpoints_observed: 0, modals_found: 0, writes_blocked: 0, skipped_never: 0, skipped_sensitive: 0, skipped_risky: 0 },
+    chromeSeen: new Set(),
+    totals: { pages_examined: 0, actions: 0, forms_submitted: 0, endpoints_observed: 0, modals_found: 0, writes_blocked: 0, skipped_never: 0, skipped_sensitive: 0, skipped_risky: 0, skipped_chrome: 0 },
   };
 }
 
@@ -81,7 +85,7 @@ export async function examinePage(
   const inventory = await session.inventory();
   const understanding = state.analyst ? await state.analyst.understand(route, inventory) : heuristicUnderstanding(route, inventory);
 
-  let probe: ProbeResult = { outcomes: [], skipped: { never: 0, sensitive: 0, risky: 0 }, used: 0 };
+  let probe: ProbeResult = { outcomes: [], skipped: { never: 0, sensitive: 0, risky: 0, chrome: 0 }, used: 0 };
   if (state.actionsLeft > 0) {
     probe = await probePage({
       session,
@@ -91,6 +95,7 @@ export async function examinePage(
       maxActions: Math.min(PER_PAGE_ACTIONS, state.actionsLeft),
       understanding,
       seed: () => ++state.seed,
+      chromeSeen: state.chromeSeen,
       shouldStop: env.shouldStop,
       deadline: env.deadline,
     });
@@ -106,6 +111,7 @@ export async function examinePage(
   t.skipped_never += probe.skipped.never;
   t.skipped_sensitive += probe.skipped.sensitive;
   t.skipped_risky += probe.skipped.risky;
+  t.skipped_chrome += probe.skipped.chrome;
 
   const led = followedOf(facts.navigations);
   const metadata: Record<string, unknown> = {

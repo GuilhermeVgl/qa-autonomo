@@ -65,6 +65,23 @@ func (q *Queries) CreateEnvironment(ctx context.Context, arg CreateEnvironmentPa
 	return i, err
 }
 
+const deleteCredential = `-- name: DeleteCredential :execrows
+DELETE FROM credentials WHERE organization_id = $1 AND id = $2
+`
+
+type DeleteCredentialParams struct {
+	OrganizationID uuid.UUID
+	ID             uuid.UUID
+}
+
+func (q *Queries) DeleteCredential(ctx context.Context, arg DeleteCredentialParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteCredential, arg.OrganizationID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getCredentialPayload = `-- name: GetCredentialPayload :one
 SELECT payload_encrypted FROM credentials
 WHERE organization_id = $1 AND environment_id = $2 AND app_role = $3 AND kind = $4

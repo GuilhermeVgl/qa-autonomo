@@ -25,24 +25,35 @@ type reqView struct {
 	Text        string    `json:"text"`
 	Criticality string    `json:"criticality"`
 	Status      string    `json:"status"`
+	Category    string    `json:"category"`
 	// Quality says why the text may be hard to test ("vago", "curto", "composto", "parecido com REQ-X"); empty when fine.
 	Quality []string `json:"quality"`
 }
 
-func toReqView(r Requirement) reqView {
+func requirementCategory(key, sourceType string) string {
+	if sourceType == "auto" || sourceType == "openapi" {
+		return "technical"
+	}
+	if keyNumber.MatchString(key) {
+		return "business"
+	}
+	return "technical"
+}
+
+func toReqView(r Requirement, sourceType string) reqView {
 	q := []string{}
 	if keyNumber.MatchString(r.Key) {
 		q = append(q, Quality(r.Text)...)
 	}
-	return reqView{ID: r.ID, Key: r.Key, Text: r.Text, Criticality: r.Criticality, Status: r.Status, Quality: q}
+	return reqView{ID: r.ID, Key: r.Key, Text: r.Text, Criticality: r.Criticality, Status: r.Status, Category: requirementCategory(r.Key, sourceType), Quality: q}
 }
 
 // reqViews is the list of a spec, with the comparison between its requirements that a single one cannot make.
-func reqViews(rows []Requirement) []reqView {
+func reqViews(rows []Requirement, sourceType string) []reqView {
 	flags := QualityOf(itemsOf(rows))
 	out := make([]reqView, 0, len(rows))
 	for _, r := range rows {
-		v := toReqView(r)
+		v := toReqView(r, sourceType)
 		if f, ok := flags[r.Key]; ok {
 			v.Quality = append([]string{}, f...)
 		}
@@ -199,7 +210,7 @@ func registerManage(mux *http.ServeMux, mw func(http.Handler) http.Handler, pool
 			httpx.Error(w, http.StatusInternalServerError, "internal error")
 			return
 		}
-		httpx.WriteJSON(w, http.StatusCreated, toReqView(created))
+		httpx.WriteJSON(w, http.StatusCreated, toReqView(created, "text"))
 	}))
 
 	mux.Handle("PATCH /api/v1/requirements/{id}", write(func(w http.ResponseWriter, r *http.Request) {
@@ -249,7 +260,7 @@ func registerManage(mux *http.ServeMux, mw func(http.Handler) http.Handler, pool
 			httpx.Error(w, http.StatusInternalServerError, "internal error")
 			return
 		}
-		httpx.WriteJSON(w, http.StatusOK, toReqView(updated))
+		httpx.WriteJSON(w, http.StatusOK, toReqView(updated, "text"))
 	}))
 
 	mux.Handle("DELETE /api/v1/requirements/{id}", write(func(w http.ResponseWriter, r *http.Request) {

@@ -132,9 +132,19 @@ export function analyzeLoginPage(doc: Document, pageUrl: string, assumeVisible: 
   const captcha =
     doc.querySelector('.g-recaptcha, .h-captcha, .cf-turnstile, [data-sitekey], iframe[src*="recaptcha"], iframe[src*="hcaptcha"], iframe[src*="turnstile"]') !== null ||
     /n[ãa]o sou um rob[ôo]|n[ãa]o [ée] um rob[ôo]|not a robot|captcha/i.test(bodyText);
-  const otp =
-    inputs.some((i) => i.autocomplete.toLowerCase() === "one-time-code") ||
-    (passwords.length === 0 && inputs.some((i) => TEXTUAL.has(i.type) && i.maxLength > 0 && i.maxLength <= 8 && /otp|totp|2fa|c[óo]digo|code|token|verifica/.test(textOf(i))));
+  // the field a one-time code goes in, so a TOTP secret can be filled in; a registration/login form is not an OTP step
+  const otpField =
+    passwords.length > 0
+      ? null
+      : (inputs.find((i) => i.autocomplete.toLowerCase() === "one-time-code") ??
+        inputs.find((i) => TEXTUAL.has(i.type) && i.maxLength > 0 && i.maxLength <= 8 && /otp|totp|2fa|c[óo]digo|code|token|verifica/.test(textOf(i))) ??
+        null);
+  if (otpField) {
+    tag(otpField, "otp");
+    const submit = pickButton(otpField.closest("form") ?? doc.body, /verificar|confirmar|continuar|entrar|validar|verify|confirm|continue|submit|\bok\b/);
+    if (submit) tag(submit, "submit");
+  }
+  const otp = otpField !== null;
 
   let message = "";
   for (const el of Array.from(doc.querySelectorAll('[role=alert], [aria-live=assertive], .alert, .error, .errors, .invalid-feedback, .flash, .notice, .text-danger, [class*="error"], [class*="erro"]'))) {

@@ -257,6 +257,7 @@ describe("App", () => {
     };
 
     it("resume a cobertura na visão geral", async () => {
+      window.location.hash = "#/";
       localStorage.setItem("qa_token", "dev:ana@x.com");
       stubApi(base);
       render(wrap(<App />));

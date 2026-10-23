@@ -34,6 +34,12 @@ export interface Credential {
   app_role: string;
   kind: string;
 }
+export interface Capture {
+  id: string;
+  status: string;
+  app_role: string;
+  start_url: string;
+}
 export interface GraphNode {
   id: string;
   kind: string;
@@ -138,6 +144,7 @@ export interface Requirement {
   text: string;
   criticality: "critical" | "high" | "normal";
   status?: "new" | "changed" | "unchanged";
+  category?: "business" | "technical";
   /** Why the text may be hard to test: "vago", "curto", "composto", "parecido com REQ-X". */
   quality?: string[];
 }
@@ -150,6 +157,32 @@ export interface SpecResult {
 export interface Coverage {
   requirements: { key: string; text: string; criticality: string; status: "covered" | "pending" | "unmatched"; node_ids: string[] }[];
   nodes: { node_id: string; label: string; status: "covered" | "no_spec"; requirement_keys: string[] }[];
+}
+
+export interface CapabilityNode {
+  id: string;
+  label: string;
+  covered: boolean;
+  status: "pass" | "fail" | "error" | "skipped" | "untested";
+}
+
+export interface Capability {
+  id: string;
+  name: string;
+  description: string;
+  criticality: "critical" | "high" | "normal";
+  source: "agent" | "human";
+  nodes_total: number;
+  nodes_covered: number;
+  nodes_tested: number;
+  status: "pass" | "fail" | "error" | "skipped" | "untested";
+  nodes: CapabilityNode[];
+}
+
+export interface CapabilityResponse {
+  graph_id: string;
+  generated_at: string;
+  capabilities: Capability[];
 }
 export interface Pendency {
   id: string;

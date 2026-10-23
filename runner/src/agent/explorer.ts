@@ -16,7 +16,7 @@ export interface PageView {
   url: string; // final URL after redirects
   status: number;
   domSignature: string;
-  links: { href: string; label: string }[];
+  links: { href: string; label: string; chrome?: boolean }[];
   /** The page answered 200 but is showing an error screen ("Something went wrong"): the text it shows. */
   softError?: string;
   /** What the security checks read from the page (headers, forms, text). Present when the visit was asked to collect it. */
@@ -47,6 +47,8 @@ export type LoginFailureReason =
   | "needs_more"
   /** The login goes through a site that is not in the allowed hosts (single sign-on). */
   | "sso_blocked"
+  /** A saved session (kind=session) no longer authenticates: it must be captured again. */
+  | "session_expired"
   /** The application did not answer. */
   | "unreachable"
   | "error";
@@ -288,6 +290,7 @@ async function exploreRole(
   const pending = new Map<string, PendingEdge[]>(); // queued URL -> edges waiting for its node
   const emittedNodes = new Set<string>();
   const emittedEdges = new Set<string>();
+  const chromeLinkSeen = new Set<string>(); // target patterns reached by a chrome link (sidebar/nav): mapped once, not from every page
   let pages = 0; // new screens only: what the interrupted exploration already examined does not use up this one's budget
 
   const emitEdge = (e: PendingEdge, toFp: string, pattern: string): void => {
@@ -408,7 +411,7 @@ async function exploreRole(
     // Edges to already-queued URLs are recorded right away; genuinely new targets go through the planner.
     const fresh: { target: string; pattern: string; edge: PendingEdge; label: string }[] = [];
     const freshUrls = new Set<string>();
-    const candidates: { href: string; label: string; via?: Followed["action"] }[] = [
+    const candidates: { href: string; label: string; chrome?: boolean; via?: Followed["action"] }[] = [
       ...view.links,
       ...followed.map((f) => ({ href: f.url, label: f.label, via: f.action })),
     ];
@@ -416,6 +419,11 @@ async function exploreRole(
       const target = classify(link, environment, outOfScope, destructive);
       if (!target) continue;
       const targetPattern = routePattern(target);
+      // a link in the reusable chrome (sidebar/nav) leads to the same place from every page: map it once, not from each screen
+      if (link.chrome) {
+        if (chromeLinkSeen.has(targetPattern)) continue;
+        chromeLinkSeen.add(targetPattern);
+      }
       const edge: PendingEdge = link.via
         ? { fromFp: fp, key: `${link.via.type} ${link.label} → ${targetPattern}`.slice(0, 480), label: link.label, action: link.via }
         : { fromFp: fp, key: `link ${targetPattern}`, label: link.label };

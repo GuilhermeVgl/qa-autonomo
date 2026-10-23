@@ -56,6 +56,7 @@ type input struct {
 	Env         envInfo
 	GraphID     uuid.UUID
 	Nodes       []graph.Node
+	NodeResults map[uuid.UUID]string
 	Edges       []graph.Edge
 	Reqs        []reqRow
 	Exploration *runInfo
@@ -198,6 +199,23 @@ type JourneyFacts struct {
 	WithoutRequirement []string `json:"without_requirement"`
 }
 
+type CapabilityItem struct {
+	Key            string `json:"key"`
+	Name           string `json:"name"`
+	Screens        int    `json:"screens"`
+	ScreensCovered int    `json:"screens_covered"`
+	ScreensTested  int    `json:"screens_tested"`
+	Status         string `json:"status"` // pass | fail | error | skipped | untested
+}
+
+type CapabilityFacts struct {
+	Total   int              `json:"total"`
+	Covered int              `json:"covered"`
+	Tested  int              `json:"tested"`
+	Failing int              `json:"failing"`
+	List    []CapabilityItem `json:"list"`
+}
+
 // Issue is something that does not add up, in the order it deserves attention.
 type Issue struct {
 	Code     string   `json:"code"`
@@ -227,6 +245,7 @@ type Facts struct {
 	Bugs           BugFacts         `json:"bugs"`
 	Security       SecurityFacts    `json:"security"`
 	Blocked        *BlockedFacts    `json:"blocked,omitempty"`
+	Capabilities   CapabilityFacts  `json:"capabilities"`
 	Access         []AccessFact     `json:"access"`
 	Journeys       JourneyFacts     `json:"journeys"`
 	OpenPendencies int              `json:"open_pendencies"`
@@ -383,6 +402,61 @@ func analyze(in input) Facts {
 	f.Coverage.ScreensWithoutRequirement = capped(f.Coverage.ScreensWithoutRequirement)
 	f.Coverage.ScreensCovered = len(covered)
 	f.Coverage.PercentScreens = percent(len(covered), len(screens))
+
+	// ---- capability coverage: screens grouped by route domain ----
+	type capAcc struct {
+		screens        int
+		screensCovered int
+		screensTested  int
+		status         string
+	}
+	caps := map[string]*capAcc{}
+	for _, route := range order {
+		key := capabilityKey(route)
+		if caps[key] == nil {
+			caps[key] = &capAcc{status: "untested"}
+		}
+		c := caps[key]
+		c.screens++
+		if covered[route] {
+			c.screensCovered++
+		}
+		screenStatus := "untested"
+		for _, n := range screens[route].nodes {
+			screenStatus = worstStatus(screenStatus, in.NodeResults[n.ID])
+		}
+		if screenStatus != "untested" {
+			c.screensTested++
+		}
+		c.status = worstStatus(c.status, screenStatus)
+	}
+	keys := make([]string, 0, len(caps))
+	for k := range caps {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		c := caps[k]
+		f.Capabilities.List = append(f.Capabilities.List, CapabilityItem{
+			Key:            k,
+			Name:           capabilityName(k),
+			Screens:        c.screens,
+			ScreensCovered: c.screensCovered,
+			ScreensTested:  c.screensTested,
+			Status:         c.status,
+		})
+		if c.screensCovered > 0 {
+			f.Capabilities.Covered++
+		}
+		if c.screensTested > 0 {
+			f.Capabilities.Tested++
+		}
+		if c.status == "fail" || c.status == "error" {
+			f.Capabilities.Failing++
+		}
+	}
+	f.Capabilities.Total = len(f.Capabilities.List)
+	f.Capabilities.List = capped(f.Capabilities.List)
 
 	// ---- alternative flows: screens not every user reaches ----
 	if len(f.Users) > 1 {
@@ -722,6 +796,57 @@ func shorten(s string, n int) string {
 		return string(r[:n]) + "…"
 	}
 	return s
+}
+
+func capabilityKey(route string) string {
+	route = strings.TrimSpace(route)
+	if route == "" || route == "/" {
+		return "home"
+	}
+	route = strings.TrimPrefix(route, "/")
+	if route == "" {
+		return "home"
+	}
+	seg := strings.Split(route, "/")[0]
+	if seg == "" {
+		return "home"
+	}
+	return strings.ToLower(seg)
+}
+
+func capabilityName(key string) string {
+	if key == "home" {
+		return "Entrada e navegação"
+	}
+	return strings.ToUpper(key[:1]) + key[1:]
+}
+
+func statusRank(s string) int {
+	switch s {
+	case "fail":
+		return 5
+	case "error":
+		return 4
+	case "pass":
+		return 3
+	case "skipped":
+		return 2
+	default:
+		return 1
+	}
+}
+
+func worstStatus(a, b string) string {
+	if statusRank(b) > statusRank(a) {
+		if b == "" {
+			return a
+		}
+		return b
+	}
+	if a == "" {
+		return "untested"
+	}
+	return a
 }
 
 func accessCheck(f Facts) Check {

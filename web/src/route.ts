@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 
-export type Page = "overview" | "map" | "flows" | "specs" | "bugs" | "runs" | "settings";
+export type Page = "overview" | "product" | "map" | "flows" | "specs" | "bugs" | "runs" | "settings";
 
-const PATHS: Record<Page, string> = { overview: "", map: "mapa", flows: "fluxos", specs: "specs", bugs: "bugs", runs: "execucoes", settings: "config" };
+const PATHS: Record<Page, string> = { overview: "", product: "produto", map: "mapa", flows: "fluxos", specs: "specs", bugs: "bugs", runs: "execucoes", settings: "config" };
 const BY_PATH = Object.fromEntries(Object.entries(PATHS).map(([page, path]) => [path, page as Page])) as Record<string, Page>;
 
 export interface Route {
@@ -11,6 +11,9 @@ export interface Route {
 }
 
 export function parseHash(hash: string): Route {
+  if (hash === "" || hash === "#") {
+    return { page: "product", sub: undefined };
+  }
   const [first = "", sub] = hash.replace(/^#\/?/, "").split("/");
   return { page: BY_PATH[first] ?? "overview", sub: sub || undefined };
 }

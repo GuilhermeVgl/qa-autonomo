@@ -2,6 +2,7 @@ import { Background, BackgroundVariant, Controls, Handle, MarkerType, Position, 
 import "@xyflow/react/dist/style.css";
 import { createContext, useContext, useEffect, useMemo } from "react";
 import { BOX_W, type Box, type Layout } from "./flows";
+import type { PossibilityView } from "./flows";
 import { roleColor } from "./roles";
 import { ScreenCard, userLabel } from "./ScreenCard";
 import type { Tone } from "./tone";
@@ -11,18 +12,19 @@ interface ChartContext {
   selectedBox: string | undefined;
   tones: Record<string, Tone>;
   focus: Record<string, string>;
+  possibilities: Record<string, PossibilityView[]>;
   onSelect: (box: Box) => void;
 }
 
-const Ctx = createContext<ChartContext>({ token: "", selectedBox: undefined, tones: {}, focus: {}, onSelect: () => undefined });
+const Ctx = createContext<ChartContext>({ token: "", selectedBox: undefined, tones: {}, focus: {}, possibilities: {}, onSelect: () => undefined });
 
 function ScreenNode({ data }: NodeProps) {
-  const { token, selectedBox, tones, focus, onSelect } = useContext(Ctx);
+  const { token, selectedBox, tones, focus, possibilities, onSelect } = useContext(Ctx);
   const box = (data as { box: Box }).box;
   return (
     <div className="flow-node" style={{ width: BOX_W, height: box.h }}>
       <Handle type="target" position={Position.Left} className="orb-handle" isConnectable={false} />
-      <ScreenCard box={box} tone={tones[box.id] ?? "neutral"} token={token} selected={selectedBox === box.id} onSelect={() => onSelect(box)} focusId={focus[box.id]} />
+      <ScreenCard box={box} tone={tones[box.id] ?? "neutral"} token={token} selected={selectedBox === box.id} onSelect={() => onSelect(box)} focusId={focus[box.id]} possibilities={possibilities[box.id] ?? []} />
       <Handle type="source" position={Position.Right} className="orb-handle" isConnectable={false} />
     </div>
   );
@@ -118,14 +120,15 @@ export interface FlowChartProps {
   tones: Record<string, Tone>;
   /** Which node stands for each box (the one that failed, when one did). */
   focus: Record<string, string>;
+  possibilities: Record<string, PossibilityView[]>;
   token: string;
   selectedBox: string | undefined;
   onSelect: (box: Box) => void;
 }
 
 /** The flow as lanes of users, left to right, each screen with its picture. */
-export function FlowChart({ layout, flowId, tones, focus, token, selectedBox, onSelect }: FlowChartProps) {
-  const ctx = useMemo<ChartContext>(() => ({ token, selectedBox, tones, focus, onSelect }), [token, selectedBox, tones, focus, onSelect]);
+export function FlowChart({ layout, flowId, tones, focus, possibilities, token, selectedBox, onSelect }: FlowChartProps) {
+  const ctx = useMemo<ChartContext>(() => ({ token, selectedBox, tones, focus, possibilities, onSelect }), [token, selectedBox, tones, focus, possibilities, onSelect]);
   return (
     <Ctx.Provider value={ctx}>
       <ReactFlowProvider>

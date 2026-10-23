@@ -101,6 +101,25 @@ const FULL = {
       ],
     }),
   "/api/v1/environments/e1/node-status": () => json([{ node_id: "n1", run_id: "r2", status: "fail", passed: 1, failed: 1, errored: 0, skipped: 0, at: new Date().toISOString() }]),
+  "/api/v1/environments/e1/capabilities": () =>
+    json({
+      graph_id: "g1",
+      generated_at: new Date().toISOString(),
+      capabilities: [
+        {
+          id: "orders",
+          name: "Orders",
+          description: "Telas de pedidos.",
+          criticality: "normal",
+          source: "agent",
+          nodes_total: 2,
+          nodes_covered: 1,
+          nodes_tested: 1,
+          status: "fail",
+          nodes: [],
+        },
+      ],
+    }),
   "/api/v1/specs/s2/pendencies": () => json([]),
   "/api/v1/projects/p1/bugs": () => json(BUGS),
   "/api/v1/runs/r2/report": () =>
@@ -123,6 +142,7 @@ const FULL = {
 
 describe("visão geral", () => {
   it("guia a configuração inicial quando o espaço de trabalho está vazio", async () => {
+    window.location.hash = "#/";
     stubApi({ "/api/v1/me": FULL["/api/v1/me"], "/api/v1/projects": () => json([]) });
     render(wrap(<App />));
     const steps = await screen.findByRole("region", { name: "Primeiros passos" });
@@ -135,6 +155,7 @@ describe("visão geral", () => {
   });
 
   it("mostra os indicadores do projeto e some com os primeiros passos quando tudo está feito", async () => {
+    window.location.hash = "#/";
     stubApi(FULL);
     render(wrap(<App />));
     expect(await screen.findByText("Olá, ana")).toBeInTheDocument();
@@ -148,11 +169,15 @@ describe("visão geral", () => {
     expect(within(recent).getByText("Regressão")).toBeInTheDocument();
     expect(within(recent).getByText("Falhou")).toBeInTheDocument();
     expect(within(recent).getByText("Concluído")).toBeInTheDocument();
+    const caps = screen.getByRole("region", { name: "Capacidades" });
+    expect(within(caps).getByText("1 / 1")).toBeInTheDocument();
+    expect(within(caps).getByText("1 com falha")).toBeInTheDocument();
   });
 });
 
 describe("navegação", () => {
   it("troca de página pelo menu lateral e marca a atual", async () => {
+    window.location.hash = "#/";
     stubApi(FULL);
     render(wrap(<App />));
     const nav = await screen.findByRole("navigation", { name: "Navegação" });
@@ -169,6 +194,16 @@ describe("navegação", () => {
     stubApi(FULL);
     render(wrap(<App />));
     expect(await screen.findByText("REQ-001 · /orders: HTTP 500")).toBeInTheDocument();
+  });
+
+  it("abre a página Produto pelo menu e mostra capacidades", async () => {
+    stubApi(FULL);
+    render(wrap(<App />));
+    const nav = await screen.findByRole("navigation", { name: "Navegação" });
+    await userEvent.click(within(nav).getByRole("link", { name: /Produto/ }));
+    expect(await screen.findByText("Capacidades de negócio inferidas a partir do mapa explorado.")).toBeInTheDocument();
+    expect(await screen.findByText("Orders")).toBeInTheDocument();
+    expect(await screen.findByText("2 tela(s)")).toBeInTheDocument();
   });
 
   it("troca o tema pelo menu lateral", async () => {
@@ -493,7 +528,7 @@ describe("fluxos", () => {
     await userEvent.click(within(chart).getByRole("button", { name: "admin: /clients" }));
     const detail = await screen.findByRole("complementary", { name: "Detalhes da tela" });
     expect(within(detail).getByText(/Só admin tem:/)).toBeInTheDocument();
-    expect(within(detail).getByText("Excluir cliente")).toBeInTheDocument();
+    expect(within(detail).getAllByText("Excluir cliente").length).toBeGreaterThan(0);
     await userEvent.click(within(chart).getByRole("button", { name: "operador: /clients/:id" }));
     expect(await screen.findByText(/operador não alcançou esta tela/)).toBeInTheDocument();
     expect(screen.getByText(/Quem alcança: admin/)).toBeInTheDocument();
@@ -650,6 +685,25 @@ describe("especificações", () => {
     const versions = screen.getByRole("complementary", { name: "Especificações do projeto" });
     expect(within(versions).getByText("Regras v2")).toBeInTheDocument();
     expect(within(versions).getByText("Regras v1")).toBeInTheDocument();
+  });
+
+  it("separa requisitos de negócio e verificações automáticas", async () => {
+    stubApi({
+      ...FULL,
+      "/api/v1/specs/s2/requirements": () =>
+        json([
+          { id: "q1", key: "REQ-001", text: "Listar pedidos", criticality: "critical", status: "unchanged", category: "business" },
+          { id: "q2", key: "PAGE /orders", text: "A tela /orders responde sem erro", criticality: "normal", status: "unchanged", category: "technical" },
+        ]),
+    });
+    render(wrap(<App />));
+    const reqs = await screen.findByRole("region", { name: "Requisitos" });
+    expect(await within(reqs).findByText("Listar pedidos")).toBeInTheDocument();
+    expect(within(reqs).queryByText("A tela /orders responde sem erro")).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("radio", { name: /Verificações automáticas/ }));
+    expect(await within(reqs).findByText("A tela /orders responde sem erro")).toBeInTheDocument();
+    expect(within(reqs).queryByText("Listar pedidos")).not.toBeInTheDocument();
   });
 
   it("mostra os requisitos de uma versão antiga, sem cobertura", async () => {

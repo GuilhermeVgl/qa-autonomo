@@ -2,18 +2,22 @@
 package ci
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/kpmg/agent-qa/control-plane/internal/apitoken"
+	"github.com/kpmg/agent-qa/control-plane/internal/audit"
 	"github.com/kpmg/agent-qa/control-plane/internal/environment"
 	"github.com/kpmg/agent-qa/control-plane/internal/httpx"
 	"github.com/kpmg/agent-qa/control-plane/internal/report"
 	"github.com/kpmg/agent-qa/control-plane/internal/run"
+	"github.com/kpmg/agent-qa/control-plane/internal/secret"
 )
 
 type runView struct {
@@ -22,7 +26,7 @@ type runView struct {
 }
 
 // Register mounts /ci/v1. publicURL (optional) is used to build the link to a run in the UI.
-func Register(mux *http.ServeMux, pool *pgxpool.Pool, publicURL string) {
+func Register(mux *http.ServeMux, pool *pgxpool.Pool, box *secret.Box, publicURL string) {
 	auth := apitoken.Authenticate(pool)
 	runs := run.New(pool)
 
@@ -124,5 +128,62 @@ func Register(mux *http.ServeMux, pool *pgxpool.Pool, publicURL string) {
 			return
 		}
 		httpx.WriteJSON(w, http.StatusOK, out)
+	}))
+
+	// Upsert a captured browser session (kind=session), so `npm run capture` can save it with a project token.
+	mux.Handle("PUT /ci/v1/credentials/session", scoped(apitoken.ScopeCredentialWrite, func(w http.ResponseWriter, r *http.Request) {
+		p, _ := apitoken.From(r.Context())
+		var in struct {
+			Environment string `json:"environment"` // name within the token's project
+			AppRole     string `json:"app_role"`
+			State       string `json:"state"` // a Playwright storageState JSON
+		}
+		if !httpx.Decode(w, r, &in) {
+			return
+		}
+		in.AppRole = strings.TrimSpace(in.AppRole)
+		if in.Environment == "" || in.AppRole == "" || in.State == "" {
+			httpx.Error(w, http.StatusBadRequest, "environment, app_role and state are required")
+			return
+		}
+		env, err := environment.New(pool).GetEnvironmentByName(r.Context(), environment.GetEnvironmentByNameParams{OrganizationID: p.OrganizationID, ProjectID: p.ProjectID, Name: in.Environment})
+		if errors.Is(err, pgx.ErrNoRows) {
+			httpx.Error(w, http.StatusNotFound, "environment not found")
+			return
+		}
+		if err != nil {
+			httpx.Error(w, http.StatusInternalServerError, "internal error")
+			return
+		}
+		plain, _ := json.Marshal(map[string]string{"state": in.State})
+		sealed, err := box.Seal(plain)
+		if err != nil {
+			httpx.Error(w, http.StatusInternalServerError, "internal error")
+			return
+		}
+		tx, err := pool.Begin(r.Context())
+		if err != nil {
+			httpx.Error(w, http.StatusInternalServerError, "internal error")
+			return
+		}
+		defer tx.Rollback(r.Context()) //nolint:errcheck // no-op after commit
+		if _, err := environment.New(tx).UpsertCredential(r.Context(), environment.UpsertCredentialParams{
+			OrganizationID: p.OrganizationID, EnvironmentID: env.ID, AppRole: in.AppRole, Kind: "session", PayloadEncrypted: sealed,
+		}); err != nil {
+			httpx.Error(w, http.StatusInternalServerError, "internal error")
+			return
+		}
+		auditPayload, _ := json.Marshal(map[string]string{"app_role": in.AppRole, "kind": "session"}) // never the session itself
+		if err := audit.New(tx).RecordAudit(r.Context(), audit.RecordAuditParams{
+			OrganizationID: p.OrganizationID, Actor: "token:" + p.Name, Action: "credential.upsert", Target: env.ID.String(), Payload: auditPayload,
+		}); err != nil {
+			httpx.Error(w, http.StatusInternalServerError, "internal error")
+			return
+		}
+		if err := tx.Commit(r.Context()); err != nil {
+			httpx.Error(w, http.StatusInternalServerError, "internal error")
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
 	}))
 }

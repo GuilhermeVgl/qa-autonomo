@@ -19,6 +19,9 @@ RETURNING id, environment_id, app_role, kind, updated_at;
 SELECT id, environment_id, app_role, kind, updated_at
 FROM credentials WHERE organization_id = $1 AND environment_id = $2 ORDER BY app_role, kind;
 
+-- name: DeleteCredential :execrows
+DELETE FROM credentials WHERE organization_id = $1 AND id = $2;
+
 -- name: GetCredentialPayload :one
 SELECT payload_encrypted FROM credentials
 WHERE organization_id = $1 AND environment_id = $2 AND app_role = $3 AND kind = $4;

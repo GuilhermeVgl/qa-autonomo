@@ -21,6 +21,7 @@ type reqRow struct {
 	Text        string   `json:"text"`
 	Criticality string   `json:"criticality"`
 	Status      string   `json:"status"`
+	Category    string   `json:"category"`
 }
 
 func manageSetup(t *testing.T) (h *testutil.Harness, owner string, w *testutil.World) {
@@ -46,6 +47,9 @@ func TestRequirementsAreListedWithTheirIDs(t *testing.T) {
 	rows := listReqs(t, h, owner, w.SpecID)
 	if len(rows) != 2 || rows[0].ID == "" {
 		t.Fatalf("rows = %+v", rows)
+	}
+	if rows[0].Category != "business" {
+		t.Fatalf("category = %q, want business", rows[0].Category)
 	}
 }
 
@@ -240,7 +244,13 @@ func TestRequirementsCarryQualityFlagsForWrittenRequirementsOnly(t *testing.T) {
 	if q := got["PAGE /x"].Quality; len(q) != 0 {
 		t.Errorf("a generated requirement is not judged, got %v", q)
 	}
+	if c := got["PAGE /x"].Category; c != "technical" {
+		t.Errorf("PAGE /x category = %q, want technical", c)
+	}
 	if got["REQ-001"].Quality == nil {
 		t.Error("quality must be a list (empty when fine), never null")
+	}
+	if c := got["REQ-001"].Category; c != "business" {
+		t.Errorf("REQ-001 category = %q, want business", c)
 	}
 }

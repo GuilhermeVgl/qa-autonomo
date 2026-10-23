@@ -3,6 +3,7 @@ import { LlmAnalyst } from "./agent/analyst.js";
 import { LlmMeter } from "./agent/meter.js";
 import { LlmPlanner } from "./agent/planner.js";
 import { loadConfig } from "./config.js";
+import { runCapture } from "./capture/remote.js";
 import { BrowserDriver } from "./executors/browser/driver.js";
 import { createCommandRunner } from "./executors/terminal/exec.js";
 import type { Driver } from "./agent/explorer.js";
@@ -28,6 +29,9 @@ async function main(): Promise<void> {
 
   let stopping = false;
   for (const sig of ["SIGINT", "SIGTERM"] as const) process.on(sig, () => (stopping = true));
+
+  // A second, independent loop handles remote-browser capture (a person logging in), so it never blocks job leasing.
+  void captureLoop(client, () => stopping);
 
   while (!stopping) {
     try {
@@ -64,6 +68,21 @@ async function main(): Promise<void> {
     } catch (err) {
       log("loop error", { error: err instanceof Error ? err.message : String(err) });
       await new Promise((r) => setTimeout(r, 5_000)); // back off, never crash-loop the control plane
+    }
+  }
+}
+
+async function captureLoop(client: ControlPlaneClient, stopping: () => boolean): Promise<void> {
+  while (!stopping()) {
+    try {
+      const session = await client.leaseCapture(25_000);
+      if (!session) continue;
+      log("capture leased", { capture_id: session.id });
+      await runCapture(client, session);
+      log("capture finished", { capture_id: session.id });
+    } catch (err) {
+      log("capture loop error", { error: err instanceof Error ? err.message : String(err) });
+      await new Promise((r) => setTimeout(r, 5_000));
     }
   }
 }

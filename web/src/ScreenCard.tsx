@@ -1,4 +1,4 @@
-import type { Box } from "./flows";
+import type { Box, PossibilityView } from "./flows";
 import { NO_USER } from "./flows";
 import type { GraphNode } from "./api";
 import { Icon } from "./icons";
@@ -28,11 +28,19 @@ function observed(node: GraphNode | undefined): { statuses: number[]; blocked: b
   return { statuses: Array.isArray(o.statuses) ? o.statuses : [], blocked: o.blocked === true };
 }
 
+const resultLabel: Record<PossibilityView["result"], string> = {
+  pass: "passou",
+  fail: "falhou",
+  error: "erro",
+  skipped: "pulado",
+  untested: "não testado",
+};
+
 /**
  * One screen as one user sees it: its picture, route, who it is for and how its last test went. The same route for two users
  * is two cards, so "same screen, different permission" is two things side by side; a user who does not reach it gets a ghost.
  */
-export function ScreenCard({ box, tone, token, selected, onSelect, focusId }: { box: Box; tone: Tone; token: string; selected: boolean; onSelect: () => void; focusId?: string }) {
+export function ScreenCard({ box, tone, token, selected, onSelect, focusId, possibilities = [] }: { box: Box; tone: Tone; token: string; selected: boolean; onSelect: () => void; focusId?: string; possibilities?: PossibilityView[] }) {
   const color = roleColor(box.user);
   const style = { "--role": color } as React.CSSProperties;
   const label = userLabel(box.user);
@@ -89,6 +97,17 @@ export function ScreenCard({ box, tone, token, selected, onSelect, focusId }: { 
           <span className="diff-badge" title={`Só ${label} tem: ${box.only.join(", ")}`}>
             + só {label}: {box.only.slice(0, 2).join(", ")}
             {box.only.length > 2 ? ` +${box.only.length - 2}` : ""}
+          </span>
+        )}
+        {possibilities.length > 0 && (
+          <span className="possibility-list" title={possibilities.map((p) => `${p.label} (${resultLabel[p.result]})`).join("\n")}>
+            {possibilities.slice(0, 3).map((p) => (
+              <span key={p.id} className={`possibility-item ${p.result}`}>
+                <i />
+                {p.label}
+              </span>
+            ))}
+            {possibilities.length > 3 && <span className="possibility-more">+{possibilities.length - 3}</span>}
           </span>
         )}
       </span>

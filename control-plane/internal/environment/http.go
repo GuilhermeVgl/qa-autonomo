@@ -152,11 +152,13 @@ func (in *credentialInput) validate() error {
 	var required []string
 	switch in.Kind {
 	case "login":
-		required = []string{"username", "password"}
+		required = []string{"username"} // a senha é opcional: SSO/magic-link e fluxos de primeira etapa só pedem o usuário
 	case "api_token":
 		required = []string{"token"}
+	case "session":
+		required = []string{"state"} // a Playwright storageState JSON captured by `npm run capture`
 	default:
-		return errors.New("kind must be login or api_token")
+		return errors.New("kind must be login, api_token or session")
 	}
 	for _, k := range required {
 		if in.Payload[k] == "" {
@@ -297,6 +299,42 @@ func Register(mux *http.ServeMux, mw func(http.Handler) http.Handler, pool *pgxp
 		}
 		httpx.WriteJSON(w, http.StatusOK, out)
 	})))
+
+	mux.Handle("DELETE /api/v1/credentials/{id}", write(func(w http.ResponseWriter, r *http.Request) {
+		p, _ := auth.PrincipalFrom(r.Context())
+		cid, err := uuid.Parse(r.PathValue("id"))
+		if err != nil {
+			httpx.Error(w, http.StatusNotFound, "not found")
+			return
+		}
+		tx, err := pool.Begin(r.Context())
+		if err != nil {
+			httpx.Error(w, http.StatusInternalServerError, "internal error")
+			return
+		}
+		defer tx.Rollback(r.Context()) //nolint:errcheck // no-op after commit
+		n, err := New(tx).DeleteCredential(r.Context(), DeleteCredentialParams{OrganizationID: p.OrganizationID, ID: cid})
+		if err != nil {
+			httpx.Error(w, http.StatusInternalServerError, "internal error")
+			return
+		}
+		if n == 0 {
+			httpx.Error(w, http.StatusNotFound, "not found")
+			return
+		}
+		auditPayload, _ := json.Marshal(map[string]string{"credential_id": cid.String()})
+		if err := audit.New(tx).RecordAudit(r.Context(), audit.RecordAuditParams{
+			OrganizationID: p.OrganizationID, Actor: p.UserID.String(), Action: "credential.delete", Target: cid.String(), Payload: auditPayload,
+		}); err != nil {
+			httpx.Error(w, http.StatusInternalServerError, "internal error")
+			return
+		}
+		if err := tx.Commit(r.Context()); err != nil {
+			httpx.Error(w, http.StatusInternalServerError, "internal error")
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
 }
 
 func notFoundOr500(w http.ResponseWriter, err error) {

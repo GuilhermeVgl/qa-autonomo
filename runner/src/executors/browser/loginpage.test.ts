@@ -98,6 +98,12 @@ describe("analyzeLoginPage: what stands in the way", () => {
     expect(read(`<form><input type="text" name="codigo" maxlength="6" placeholder="Código de verificação"><button>Confirmar</button></form>`).blocker).toBe("otp");
   });
 
+  it("tags the code field and its button so a TOTP secret can be filled in", () => {
+    read(`<form><input name="code" autocomplete="one-time-code" maxlength="6"><button type="submit">Verificar</button></form>`);
+    expect(tagged("otp")).toBe("code");
+    expect(tagged("submit")).toBe("Verificar");
+  });
+
   it("is not blocked on an ordinary login", () => {
     expect(read(`<form><input type="text" name="u"><input type="password" name="p"><button>Entrar</button></form>`).blocker).toBeNull();
   });

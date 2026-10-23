@@ -1,11 +1,12 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { api, errorMessage, type Requirement, type RunReport, type Spec } from "../api";
 import { Icon } from "../icons";
 import { EmptyState, Modal, PageHeader, Segmented, Skeleton, useToast } from "../ui";
 import { useWorkspace } from "../workspace";
 
 type Filter = "all" | Requirement["criticality"];
+type CategoryFilter = "business" | "technical";
 
 const CRITICALITY: Record<string, string> = { critical: "crítico", high: "alto", normal: "normal" };
 const COVERAGE: Record<string, { label: string; tone: string }> = {
@@ -29,6 +30,9 @@ const QUALITY_HINT: Record<string, string> = {
 
 const sourceLabel = (s: Spec) => (s.source_type === "openapi" ? "OpenAPI" : s.source_type === "auto" ? "Automática" : "Texto");
 
+const keyCategory = (key: string): CategoryFilter => (/^REQ-\d+$/i.test(key) ? "business" : "technical");
+const requirementCategory = (r: Requirement): CategoryFilter => (r.category === "business" || r.category === "technical" ? r.category : keyCategory(r.key));
+
 export function SpecsPage() {
   const ws = useWorkspace();
   const qc = useQueryClient();
@@ -37,11 +41,18 @@ export function SpecsPage() {
   const [pickedId, setPickedId] = useState<string>();
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
+  const [category, setCategory] = useState<CategoryFilter>("business");
   const [editing, setEditing] = useState<Requirement | "new" | null>(null);
   const [renaming, setRenaming] = useState(false);
   const [deleting, setDeleting] = useState<Spec | null>(null);
   const selected = specs?.find((s) => s.id === pickedId) ?? latest ?? specs?.[0];
   const canRun = !!ws.env && !ws.env.is_production && !!ws.graph.data && !ws.activeRun;
+
+  useEffect(() => {
+    if (!selected) return;
+    if (selected.source_type === "auto" || selected.source_type === "openapi") setCategory("technical");
+    else setCategory("business");
+  }, [selected?.id, selected?.source_type]);
 
   const requirements = useQuery({
     queryKey: ["requirements", selected?.id],
@@ -66,9 +77,16 @@ export function SpecsPage() {
   const outcomeByKey = useMemo(() => new Map(lastReport?.requirements.map((r) => [r.key, r.outcome]) ?? []), [lastReport]);
   const usersByKey = useMemo(() => new Map(lastReport?.requirements.map((r) => [r.key, r.by_user ?? {}]) ?? []), [lastReport]);
 
-  const rows = (requirements.data ?? []).filter(
-    (r) => (filter === "all" || r.criticality === filter) && (search.trim() === "" || `${r.key} ${r.text}`.toLowerCase().includes(search.trim().toLowerCase())),
-  );
+  const rows = (requirements.data ?? []).filter((r) => {
+    const cat = requirementCategory(r);
+    return cat === category && (filter === "all" || r.criticality === filter) && (search.trim() === "" || `${r.key} ${r.text}`.toLowerCase().includes(search.trim().toLowerCase()));
+  });
+
+  const counts = useMemo(() => {
+    const out = { business: 0, technical: 0 };
+    for (const r of requirements.data ?? []) out[requirementCategory(r)] += 1;
+    return out;
+  }, [requirements.data]);
 
   const refresh = () => Promise.all([qc.invalidateQueries({ queryKey: ["specs"] }), qc.invalidateQueries({ queryKey: ["requirements"] }), qc.invalidateQueries({ queryKey: ["coverage"] }), qc.invalidateQueries({ queryKey: ["pendencies"] })]);
 
@@ -174,6 +192,15 @@ export function SpecsPage() {
               <input aria-label="Buscar requisitos" placeholder="Buscar por chave ou texto" value={search} onChange={(e) => setSearch(e.target.value)} />
             </label>
             <Segmented
+              label="Tipo"
+              value={category}
+              onChange={setCategory}
+              options={[
+                { value: "business", label: `Requisitos (${counts.business})` },
+                { value: "technical", label: `Verificações automáticas (${counts.technical})` },
+              ]}
+            />
+            <Segmented
               label="Criticidade"
               value={filter}
               onChange={setFilter}
@@ -196,7 +223,11 @@ export function SpecsPage() {
               ))}
             </div>
           ) : rows.length === 0 ? (
-            <EmptyState icon="search" title="Nenhum requisito encontrado" text="Ajuste a busca ou o filtro de criticidade." />
+            <EmptyState
+              icon="search"
+              title={category === "business" ? "Nenhum requisito encontrado" : "Nenhuma verificação automática encontrada"}
+              text={category === "business" ? "Ajuste a busca ou o filtro de criticidade." : "Esta especificação não tem verificações automáticas nesta busca."}
+            />
           ) : (
             <table className="table">
               <thead>
@@ -222,9 +253,9 @@ export function SpecsPage() {
                       </td>
                       <td>
                         {r.text}
-                        {selected?.source_type !== "auto" && r.status === "new" && <span className="pill status-new"> novo</span>}
-                        {selected?.source_type !== "auto" && r.status === "changed" && <span className="pill status-reopened"> alterado</span>}
-                        {(r.quality ?? []).length > 0 && (
+                        {category === "business" && selected?.source_type !== "auto" && r.status === "new" && <span className="pill status-new"> novo</span>}
+                        {category === "business" && selected?.source_type !== "auto" && r.status === "changed" && <span className="pill status-reopened"> alterado</span>}
+                        {category === "business" && (r.quality ?? []).length > 0 && (
                           <span className="quality-flags" aria-label={`Revisar ${r.key}`}>
                             {(r.quality ?? []).map((q) => (
                               <span key={q} className="pill status-reopened" title={QUALITY_HINT[q.split(" ")[0] ?? ""] ?? "Revise este requisito"}>

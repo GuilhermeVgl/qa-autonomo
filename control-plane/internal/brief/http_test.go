@@ -75,6 +75,11 @@ type briefOut struct {
 		Bugs struct {
 			Open int `json:"open"`
 		} `json:"bugs"`
+		Capabilities struct {
+			Total   int `json:"total"`
+			Tested  int `json:"tested"`
+			Failing int `json:"failing"`
+		} `json:"capabilities"`
 		Issues []struct {
 			Code string `json:"code"`
 		} `json:"issues"`
@@ -124,6 +129,9 @@ func TestBrief_BuildsTheFactsOfAnEnvironmentFromWhatThePlatformKnows(t *testing.
 	}
 	if out.Facts.Bugs.Open != 1 {
 		t.Errorf("open bugs = %d, want the 500 of /orders", out.Facts.Bugs.Open)
+	}
+	if out.Facts.Capabilities.Total == 0 {
+		t.Errorf("capabilities = %+v, want capability coverage from the map", out.Facts.Capabilities)
 	}
 	codes := map[string]bool{}
 	for _, i := range out.Facts.Issues {

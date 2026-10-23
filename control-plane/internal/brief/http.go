@@ -62,6 +62,23 @@ func load(ctx context.Context, pool *pgxpool.Pool, org, envID uuid.UUID, caps Ca
 		if in.Nodes, err = gq.ListNodes(ctx, graph.ListNodesParams{OrganizationID: org, GraphID: g.ID}); err != nil {
 			return input{}, err
 		}
+		rows, err := gq.LatestNodeResults(ctx, graph.LatestNodeResultsParams{OrganizationID: org, EnvironmentID: envID, GraphID: g.ID})
+		if err != nil {
+			return input{}, err
+		}
+		in.NodeResults = map[uuid.UUID]string{}
+		for _, row := range rows {
+			status := "skipped"
+			switch {
+			case row.Failed > 0:
+				status = "fail"
+			case row.Errored > 0:
+				status = "error"
+			case row.Passed > 0:
+				status = "pass"
+			}
+			in.NodeResults[row.NodeID] = status
+		}
 		if in.Edges, err = gq.ListEdges(ctx, graph.ListEdgesParams{OrganizationID: org, GraphID: g.ID}); err != nil {
 			return input{}, err
 		}
